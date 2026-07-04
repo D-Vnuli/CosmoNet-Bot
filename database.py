@@ -177,7 +177,7 @@ def get_inactive_subscriptions_count():
         return cursor.fetchone()[0]
 
 def get_all_users(limit: int = 20):
-    with sqlite3.connect(DB_PATH) as conn:
+    with get_connection() as conn:
         cursor = conn.cursor()
 
         cursor.execute("""
@@ -185,17 +185,20 @@ def get_all_users(limit: int = 20):
                 users.telegram_id,
                 users.username,
                 users.first_name,
-                COALESCE(subscriptions.status, 'inactive') AS status,
-                subscriptions.expires_at,
-                subscriptions.tariff,
                 users.registered_at
             FROM users
-            LEFT JOIN subscriptions ON subscriptions.user_id = users.id
             ORDER BY users.id DESC
             LIMIT ?
         """, (limit,))
 
         return cursor.fetchall()
+
+
+def get_all_telegram_ids():
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT telegram_id FROM users")
+        return [row[0] for row in cursor.fetchall()]
 
 
 def get_users_stats():

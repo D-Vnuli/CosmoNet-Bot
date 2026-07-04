@@ -1,10 +1,11 @@
+from html import escape
+
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
-from services.xui_service import XUIService
+from services.xui_service import XUIService, format_expiry_time
 from config import ADMIN_IDS
-from database import get_all_users, get_users_stats
-from keyboards.main_menu import main_menu
+from database import get_all_telegram_ids, get_all_users
 
 router = Router()
 
@@ -44,14 +45,43 @@ async def admin_stats(message: Message):
     if not is_admin(message):
         return
 
-    stats = get_users_stats()
+    telegram_ids = get_all_telegram_ids()
+    total_users = len(telegram_ids)
+    xui = XUIService()
+    result = await xui.get_all_clients()
+
+    if not result["success"]:
+        await message.answer(
+            "📊 <b>Статистика CosmoNet</b>\n\n"
+            "━━━━━━━━━━━━━━\n\n"
+            f"👥 <b>Пользователей бота:</b> {total_users}\n\n"
+            "❌ Не удалось получить актуальные статусы из 3X-UI.\n\n"
+            f"Ошибка: {escape(str(result['error']))}"
+        )
+        return
+
+    clients = result["clients"]
+    active_profiles = sum(
+        1
+        for client in clients
+        if client.get("enable", False)
+    )
+    disabled_profiles = len(clients) - active_profiles
+    telegram_id_strings = {str(telegram_id) for telegram_id in telegram_ids}
+    linked_telegram_ids = {
+        str(client.get("email"))
+        for client in clients
+        if str(client.get("email")) in telegram_id_strings
+    }
 
     await message.answer(
         "📊 <b>Статистика CosmoNet</b>\n\n"
         "━━━━━━━━━━━━━━\n\n"
-        f"👥 <b>Всего пользователей:</b> {stats['total_users']}\n"
-        f"🟢 <b>Активных подписок:</b> {stats['active_users']}\n"
-        f"🔴 <b>Без подписки:</b> {stats['inactive_users']}\n\n"
+        f"👥 <b>Пользователей бота:</b> {total_users}\n"
+        f"🔗 <b>VPN-профилей в 3X-UI:</b> {len(clients)}\n"
+        f"🟢 <b>Активных VPN-профилей:</b> {active_profiles}\n"
+        f"🔴 <b>Отключённых VPN-профилей:</b> {disabled_profiles}\n"
+        f"🔄 <b>Связано с пользователями бота:</b> {len(linked_telegram_ids)}\n\n"
         "━━━━━━━━━━━━━━"
     )
 
@@ -67,17 +97,41 @@ async def admin_users(message: Message):
         await message.answer("👥 Пользователей пока нет.")
         return
 
+    telegram_ids = [user[0] for user in users]
+    xui = XUIService()
+    result = await xui.get_clients_by_emails(telegram_ids)
+
+    if not result["success"]:
+        await message.answer(
+            "👥 <b>Последние пользователи</b>\n\n"
+            "━━━━━━━━━━━━━━\n\n"
+            "❌ Не удалось получить актуальные статусы из 3X-UI.\n\n"
+            f"Ошибка: {escape(str(result['error']))}"
+        )
+        return
+
+    clients = result["clients"]
     text = "👥 <b>Последние пользователи</b>\n\n━━━━━━━━━━━━━━\n\n"
 
     for index, user in enumerate(users, start=1):
-        telegram_id, username, first_name, status, subscription_until, tariff, registered_at = user
+        telegram_id, username, first_name, _registered_at = user
+        client = clients.get(str(telegram_id))
 
-        status_text = "🟢 активна" if status == "active" else "🔴 нет подписки"
-        username_text = f"@{username}" if username else "без username"
-        until_text = subscription_until if subscription_until else "—"
+        if not client:
+            status_text = "🔴 VPN-профиль не создан"
+            until_text = "—"
+        elif client.get("enable", False):
+            status_text = "🟢 активна"
+            until_text = format_expiry_time(client.get("expiry_time"))
+        else:
+            status_text = "🟠 отключена"
+            until_text = format_expiry_time(client.get("expiry_time"))
+
+        username_text = f"@{escape(username)}" if username else "без username"
+        first_name_text = escape(first_name) if first_name else "Без имени"
 
         text += (
-            f"{index}. <b>{first_name or 'Без имени'}</b>\n"
+            f"{index}. <b>{first_name_text}</b>\n"
             f"   {username_text}\n"
             f"   ID: <code>{telegram_id}</code>\n"
             f"   Статус: {status_text}\n"

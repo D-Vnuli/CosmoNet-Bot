@@ -1,4 +1,5 @@
 import json
+from collections.abc import Iterable
 from datetime import datetime
 
 import aiohttp
@@ -55,7 +56,7 @@ class XUIService:
             }
 
     async def get_client_by_email(self, email: str):
-        result = await self.get_inbounds()
+        result = await self.get_clients_by_emails([email])
 
         if not result["success"]:
             return {
@@ -64,7 +65,61 @@ class XUIService:
                 "client": None
             }
 
-        for inbound in result["inbounds"]:
+        return {
+            "success": True,
+            "error": None,
+            "client": result["clients"].get(str(email))
+        }
+
+    async def get_clients_by_emails(self, emails: Iterable[str | int]):
+        requested_emails = {str(email) for email in emails}
+
+        if not requested_emails:
+            return {
+                "success": True,
+                "error": None,
+                "clients": {}
+            }
+
+        result = await self.get_all_clients()
+
+        if not result["success"]:
+            return {
+                "success": False,
+                "error": result["error"],
+                "clients": {}
+            }
+
+        found_clients = {}
+
+        for client in result["clients"]:
+            email = str(client.get("email"))
+
+            if email in requested_emails and email not in found_clients:
+                found_clients[email] = client
+
+        return {
+            "success": True,
+            "error": None,
+            "clients": found_clients
+        }
+
+    async def get_all_clients(self):
+        result = await self.get_inbounds()
+
+        if not result["success"]:
+            return {
+                "success": False,
+                "error": result["error"],
+                "clients": []
+            }
+
+        found_clients = []
+
+        for inbound in result["inbounds"] or []:
+            if not isinstance(inbound, dict):
+                continue
+
             settings_raw = inbound.get("settings", {})
 
             if isinstance(settings_raw, str):
@@ -80,46 +135,45 @@ class XUIService:
             clients = settings.get("clients", [])
             client_stats = inbound.get("clientStats", [])
 
+            if not isinstance(clients, list):
+                clients = []
+
+            if not isinstance(client_stats, list):
+                client_stats = []
+
+            stats_by_email = {
+                str(item.get("email")): item
+                for item in client_stats
+                if isinstance(item, dict)
+            }
+
             for client in clients:
-                if str(client.get("email")) == str(email):
-                    stats = None
+                if not isinstance(client, dict):
+                    continue
 
-                    for item in client_stats:
-                        if str(item.get("email")) == str(email):
-                            stats = item
-                            break
-
-                    print("=== 3X-UI CLIENT DEBUG ===")
-                    print(client)
-
-                    print("=== 3X-UI STATS DEBUG ===")
-                    print(stats)
-
-                    return {
-                        "success": True,
-                        "error": None,
-                        "client": {
-                            "email": client.get("email"),
-                            "id": client.get("id"),
-                            "sub_id": client.get("subId"),
-                            "enable": client.get("enable", False),
-                            "expiry_time": client.get("expiryTime"),
-                            "total_gb": client.get("totalGB", 0),
-                            "inbound_id": inbound.get("id"),
-                            "inbound_remark": inbound.get("remark"),
-                            "inbound_port": inbound.get("port"),
-                            "protocol": inbound.get("protocol"),
-                            "limit_ip": client.get("limitIp", 0),
-                            "up": stats.get("up", 0) if stats else 0,
-                            "down": stats.get("down", 0) if stats else 0,
-                            "total": stats.get("total", 0) if stats else 0,
-                        }
-                    }
+                email = str(client.get("email"))
+                stats = stats_by_email.get(email)
+                found_clients.append({
+                    "email": client.get("email"),
+                    "id": client.get("id"),
+                    "sub_id": client.get("subId"),
+                    "enable": client.get("enable", False),
+                    "expiry_time": client.get("expiryTime"),
+                    "total_gb": client.get("totalGB", 0),
+                    "inbound_id": inbound.get("id"),
+                    "inbound_remark": inbound.get("remark"),
+                    "inbound_port": inbound.get("port"),
+                    "protocol": inbound.get("protocol"),
+                    "limit_ip": client.get("limitIp", 0),
+                    "up": stats.get("up", 0) if stats else 0,
+                    "down": stats.get("down", 0) if stats else 0,
+                    "total": stats.get("total", 0) if stats else 0,
+                })
 
         return {
             "success": True,
             "error": None,
-            "client": None
+            "clients": found_clients
         }
 
 
