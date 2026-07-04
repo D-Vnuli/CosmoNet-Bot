@@ -2,8 +2,9 @@ from aiogram import Router, F
 from aiogram.filters import CommandStart
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 
-from database import add_user_if_not_exists, get_user_with_subscription
+from database import add_user_if_not_exists
 from keyboards.main_menu import main_menu
+from services.xui_service import XUIService, format_bytes, format_expiry_time
 
 router = Router()
 
@@ -69,44 +70,51 @@ async def subscription(message: Message):
 
 @router.message(F.text == "📊 Статус подписки")
 async def subscription_status(message: Message):
-    user = get_user_with_subscription(message.from_user.id)
+    telegram_id = str(message.from_user.id)
 
-    if not user:
+    xui = XUIService()
+    result = await xui.get_client_by_email(telegram_id)
+
+    if not result["success"]:
         await message.answer(
-            "Пользователь не найден. Нажмите /start для регистрации."
+            "📊 <b>Статус подписки</b>\n\n"
+            "━━━━━━━━━━━━━━\n\n"
+            "❌ Не удалось получить данные из 3X-UI.\n\n"
+            f"Ошибка: {result['error']}"
         )
         return
 
-    (
-        user_id,
-        telegram_id,
-        username,
-        first_name,
-        last_name,
-        language_code,
-        registered_at,
-        vpn_uuid,
-        devices_count,
-        last_connection,
-        status,
-        tariff,
-        started_at,
-        expires_at
-    ) = user
+    client = result["client"]
 
-    status_text = "🟢 активна" if status == "active" else "🔴 не активна"
-    tariff_text = tariff if tariff else "отсутствует"
-    expires_text = expires_at if expires_at else "—"
+    if not client:
+        await message.answer(
+            "📊 <b>Статус подписки</b>\n\n"
+            "━━━━━━━━━━━━━━\n\n"
+            "🔴 <b>Статус:</b> подписка не найдена\n\n"
+            "Ваш профиль пока не связан с VPN-панелью.\n"
+            "Обратитесь в поддержку."
+        )
+        return
+
+    status_text = "🟢 активна" if client["enable"] else "🔴 отключена"
+    expiry_text = format_expiry_time(client["expiry_time"])
+
+    used_traffic = client["up"] + client["down"]
+
+    used_text = format_bytes(used_traffic)
+
+    devices_limit = client.get("limit_ip", 0)
+    devices_text = "Без ограничения" if devices_limit == 0 else str(devices_limit)
 
     await message.answer(
-        "📊 <b>Статус подписки</b>\n\n"
+        "📊 <b>Статус подписки CosmoNet</b>\n\n"
         "━━━━━━━━━━━━━━\n\n"
         f"<b>Статус:</b> {status_text}\n"
-        f"📦 <b>Тариф:</b> {tariff_text}\n"
-        f"📅 <b>Действует до:</b> {expires_text}\n\n"
+        f"📅 <b>Действует до:</b> {expiry_text}\n"
+        f"📊 <b>Использовано:</b> {used_text}\n"
+        f"📱 <b>Устройств:</b> {devices_text}\n\n"
         "━━━━━━━━━━━━━━\n\n"
-        f"👤 <b>Пользователь:</b> {first_name or '—'}\n"
-        f"🆔 <b>Telegram ID:</b> {telegram_id}"
+        "Спасибо, что пользуетесь CosmoNet 💚"
     )
 
 
