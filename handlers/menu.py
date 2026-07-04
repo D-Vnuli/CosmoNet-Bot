@@ -2,7 +2,7 @@ from aiogram import Router, F
 from aiogram.filters import CommandStart
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 
-from database import add_user_if_not_exists, get_user
+from database import add_user_if_not_exists, get_user_with_subscription
 from keyboards.main_menu import main_menu
 
 router = Router()
@@ -36,7 +36,9 @@ async def start_handler(message: Message):
     add_user_if_not_exists(
         telegram_id=message.from_user.id,
         username=message.from_user.username,
-        first_name=message.from_user.first_name
+        first_name=message.from_user.first_name,
+        last_name=message.from_user.last_name,
+        language_code=message.from_user.language_code
     )
 
     await message.answer(
@@ -67,7 +69,7 @@ async def subscription(message: Message):
 
 @router.message(F.text == "📊 Статус подписки")
 async def subscription_status(message: Message):
-    user = get_user(message.from_user.id)
+    user = get_user_with_subscription(message.from_user.id)
 
     if not user:
         await message.answer(
@@ -75,21 +77,36 @@ async def subscription_status(message: Message):
         )
         return
 
-    _, username, first_name, registered_at, status, subscription_until, tariff = user
+    (
+        user_id,
+        telegram_id,
+        username,
+        first_name,
+        last_name,
+        language_code,
+        registered_at,
+        vpn_uuid,
+        devices_count,
+        last_connection,
+        status,
+        tariff,
+        started_at,
+        expires_at
+    ) = user
 
     status_text = "🟢 активна" if status == "active" else "🔴 не активна"
     tariff_text = tariff if tariff else "отсутствует"
-    until_text = subscription_until if subscription_until else "—"
+    expires_text = expires_at if expires_at else "—"
 
     await message.answer(
         "📊 <b>Статус подписки</b>\n\n"
         "━━━━━━━━━━━━━━\n\n"
-        f"{status_text}\n"
+        f"<b>Статус:</b> {status_text}\n"
         f"📦 <b>Тариф:</b> {tariff_text}\n"
-        f"📅 <b>Действует до:</b> {until_text}\n\n"
+        f"📅 <b>Действует до:</b> {expires_text}\n\n"
         "━━━━━━━━━━━━━━\n\n"
         f"👤 <b>Пользователь:</b> {first_name or '—'}\n"
-        f"🆔 <b>Telegram ID:</b> {message.from_user.id}"
+        f"🆔 <b>Telegram ID:</b> {telegram_id}"
     )
 
 
