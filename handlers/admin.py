@@ -19,8 +19,8 @@ router = Router()
 
 admin_menu = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="📊 Админ: статистика")],
-        [KeyboardButton(text="👥 Админ: пользователи")],
+        [KeyboardButton(text="📊 Статистика")],
+        [KeyboardButton(text="👥 Пользователи")],
         [KeyboardButton(text="📣 Рассылка")],
         [KeyboardButton(text="🔌 Тест 3X-UI")],
         [KeyboardButton(text="⬅️ Главное меню")]
@@ -236,7 +236,7 @@ async def broadcast_receive_content(message: Message, state: FSMContext):
     )
 
 
-@router.message(F.text == "📊 Админ: статистика")
+@router.message(F.text == "📊 Статистика")
 async def admin_stats(message: Message):
     if not is_admin(message):
         return
@@ -282,7 +282,7 @@ async def admin_stats(message: Message):
     )
 
 
-@router.message(F.text == "👥 Админ: пользователи")
+@router.message(F.text == "👥 Пользователи")
 async def admin_users(message: Message):
     if not is_admin(message):
         return

@@ -2,6 +2,7 @@ from aiogram import Router, F
 from aiogram.filters import CommandStart
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from services.subscription_service import SubscriptionService
+from services.tariff_service import TARIFFS, get_tariff_by_button_text
 from database import add_user_if_not_exists
 from keyboards.main_menu import main_menu
 from services.xui_service import XUIService, format_bytes, format_expiry_time
@@ -31,6 +32,18 @@ info_menu = ReplyKeyboardMarkup(
     ],
     resize_keyboard=True,
     input_field_placeholder="Выберите раздел"
+)
+
+
+tariff_menu = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text=tariff.button_text)]
+        for tariff in TARIFFS
+    ] + [
+        [KeyboardButton(text="⬅️ Назад к подписке")]
+    ],
+    resize_keyboard=True,
+    input_field_placeholder="Выберите тариф"
 )
 
 
@@ -206,7 +219,9 @@ async def buy_subscription(message: Message):
             "━━━━━━━━━━━━━━\n\n"
             "Ваш VPN-профиль уже найден в системе.\n\n"
             "Новый конфиг создаваться не будет.\n"
-            "После оплаты будет продлена текущая подписка."
+            "После оплаты будет продлена текущая подписка.\n\n"
+            "Выберите тариф:",
+            reply_markup=tariff_menu
         )
         return
 
@@ -214,8 +229,57 @@ async def buy_subscription(message: Message):
         "🛒 <b>Первая покупка подписки</b>\n\n"
         "━━━━━━━━━━━━━━\n\n"
         "Ваш VPN-профиль пока не найден.\n\n"
-        "После оплаты бот создаст новый VPN-конфиг и выдаст его вам."
+        "После оплаты бот создаст новый VPN-конфиг и выдаст его вам.\n\n"
+        "Выберите тариф:",
+        reply_markup=tariff_menu
     )
+
+
+@router.message(F.text.in_({
+    tariff.button_text
+    for tariff in TARIFFS
+}))
+async def select_tariff(message: Message):
+    tariff = get_tariff_by_button_text(message.text)
+
+    if not tariff:
+        return
+
+    service = SubscriptionService()
+    result = await service.get_purchase_action(message.from_user.id)
+
+    if not result["success"]:
+        await message.answer(
+            "❌ Не удалось проверить данные в VPN-панели.\n\n"
+            f"Ошибка: {result['error']}"
+        )
+        return
+
+    if result["action"] == "renew":
+        action_text = (
+            "После подключения оплаты текущая подписка будет продлена, "
+            "а лимит устройств обновлён согласно тарифу."
+        )
+    else:
+        action_text = (
+            "После подключения оплаты бот создаст VPN-профиль "
+            "с выбранным лимитом устройств."
+        )
+
+    await message.answer(
+        f"{tariff.emoji} <b>Тариф {tariff.name}</b>\n\n"
+        "━━━━━━━━━━━━━━\n\n"
+        f"📱 <b>Устройств:</b> {tariff.devices}\n"
+        "💰 <b>Стоимость:</b> уточняется\n\n"
+        f"{action_text}\n\n"
+        "Платёжная система пока не подключена.",
+        reply_markup=tariff_menu
+    )
+
+
+@router.message(F.text == "⬅️ Назад к подписке")
+async def back_to_subscription(message: Message):
+    await subscription(message)
 
 
 @router.message(F.text == "ℹ️ INFO")
