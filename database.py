@@ -51,6 +51,24 @@ def init_db():
             )
         """)
 
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                telegram_id INTEGER NOT NULL,
+                tariff_code TEXT NOT NULL,
+                devices INTEGER NOT NULL,
+                duration_days INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                provider TEXT NOT NULL DEFAULT 'test',
+                status TEXT NOT NULL DEFAULT 'pending',
+                target_expiry_ms INTEGER NOT NULL,
+                error TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT
+            )
+        """)
+
         conn.commit()
 
 
@@ -201,6 +219,18 @@ def get_all_telegram_ids():
         return [row[0] for row in cursor.fetchall()]
 
 
+def is_registered_user(telegram_id: int) -> bool:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT 1
+            FROM users
+            WHERE telegram_id = ?
+            LIMIT 1
+        """, (telegram_id,))
+        return cursor.fetchone() is not None
+
+
 def get_users_stats():
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
@@ -223,3 +253,110 @@ def get_users_stats():
             "active_users": active_users,
             "inactive_users": inactive_users
         }
+
+
+def create_test_order(
+    *,
+    telegram_id: int,
+    tariff_code: str,
+    devices: int,
+    duration_days: int,
+    action: str,
+    target_expiry_ms: int
+) -> int:
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO orders (
+                telegram_id,
+                tariff_code,
+                devices,
+                duration_days,
+                action,
+                provider,
+                status,
+                target_expiry_ms,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, 'test', 'pending', ?, ?, ?)
+        """, (
+            telegram_id,
+            tariff_code,
+            devices,
+            duration_days,
+            action,
+            target_expiry_ms,
+            now,
+            now
+        ))
+        conn.commit()
+        return cursor.lastrowid
+
+
+def get_order(order_id: int):
+    with get_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT *
+            FROM orders
+            WHERE id = ?
+        """, (order_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+
+def claim_test_order(order_id: int):
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE orders
+            SET status = 'processing',
+                error = NULL,
+                updated_at = ?
+            WHERE id = ?
+              AND provider = 'test'
+              AND status IN ('pending', 'failed')
+        """, (now, order_id))
+        conn.commit()
+
+        if cursor.rowcount != 1:
+            return None
+
+    return get_order(order_id)
+
+
+def complete_order(order_id: int):
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE orders
+            SET status = 'paid',
+                error = NULL,
+                updated_at = ?,
+                completed_at = ?
+            WHERE id = ?
+        """, (now, now, order_id))
+        conn.commit()
+
+
+def fail_order(order_id: int, error: str):
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE orders
+            SET status = 'failed',
+                error = ?,
+                updated_at = ?
+            WHERE id = ?
+        """, (error, now, order_id))
+        conn.commit()

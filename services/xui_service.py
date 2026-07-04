@@ -1,24 +1,94 @@
 import json
 from collections.abc import Iterable
 from datetime import datetime
+from urllib.parse import quote
 
 import aiohttp
 
-from config import XUI_BASE_URL, XUI_API_TOKEN
+from config import XUI_API_TOKEN, XUI_BASE_URL, XUI_INBOUND_ID
 
 
 class XUIService:
     def __init__(self):
         self.base_url = XUI_BASE_URL.rstrip("/") if XUI_BASE_URL else None
         self.api_token = XUI_API_TOKEN
+        self.inbound_id = XUI_INBOUND_ID
 
     def is_configured(self) -> bool:
         return bool(self.base_url and self.api_token)
 
     def get_headers(self) -> dict:
         return {
-            "Authorization": f"Bearer {self.api_token}"
+            "Authorization": f"Bearer {self.api_token}",
+            "Accept": "application/json"
         }
+
+    async def _request_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        payload: dict | None = None
+    ):
+        if not self.is_configured():
+            return {
+                "success": False,
+                "error": "3X-UI не настроен в .env",
+                "obj": None
+            }
+
+        url = f"{self.base_url}{path}"
+        timeout = aiohttp.ClientTimeout(total=30)
+
+        try:
+            async with aiohttp.ClientSession(
+                headers=self.get_headers(),
+                timeout=timeout
+            ) as session:
+                async with session.request(
+                    method,
+                    url,
+                    json=payload
+                ) as response:
+                    raw_body = await response.text()
+
+                    try:
+                        data = json.loads(raw_body) if raw_body else {}
+                    except json.JSONDecodeError:
+                        data = {}
+
+                    if response.status >= 400:
+                        return {
+                            "success": False,
+                            "error": (
+                                data.get("msg")
+                                or f"3X-UI вернул HTTP {response.status}"
+                            ),
+                            "obj": None
+                        }
+
+                    if not data.get("success"):
+                        return {
+                            "success": False,
+                            "error": data.get(
+                                "msg",
+                                "3X-UI не подтвердил операцию"
+                            ),
+                            "obj": data.get("obj")
+                        }
+
+                    return {
+                        "success": True,
+                        "error": None,
+                        "obj": data.get("obj")
+                    }
+
+        except Exception as error:
+            return {
+                "success": False,
+                "error": f"Ошибка подключения к 3X-UI: {error}",
+                "obj": None
+            }
 
     async def get_inbounds(self):
         if not self.is_configured():
@@ -165,6 +235,15 @@ class XUIService:
                     "inbound_port": inbound.get("port"),
                     "protocol": inbound.get("protocol"),
                     "limit_ip": client.get("limitIp", 0),
+                    "flow": client.get("flow", ""),
+                    "password": client.get("password", ""),
+                    "auth": client.get("auth", ""),
+                    "security": client.get("security", ""),
+                    "tg_id": client.get("tgId", 0),
+                    "comment": client.get("comment", ""),
+                    "reset": client.get("reset", 0),
+                    "created_at": client.get("created_at", 0),
+                    "updated_at": client.get("updated_at", 0),
                     "up": stats.get("up", 0) if stats else 0,
                     "down": stats.get("down", 0) if stats else 0,
                     "total": stats.get("total", 0) if stats else 0,
@@ -174,6 +253,240 @@ class XUIService:
             "success": True,
             "error": None,
             "clients": found_clients
+        }
+
+    async def get_provisioning_inbound_id(self):
+        result = await self.get_inbounds()
+
+        if not result["success"]:
+            return {
+                "success": False,
+                "error": result["error"],
+                "inbound_id": None
+            }
+
+        inbounds = [
+            inbound
+            for inbound in result["inbounds"] or []
+            if isinstance(inbound, dict)
+        ]
+
+        if self.inbound_id is not None:
+            selected = next(
+                (
+                    inbound
+                    for inbound in inbounds
+                    if inbound.get("id") == self.inbound_id
+                ),
+                None
+            )
+
+            if not selected:
+                return {
+                    "success": False,
+                    "error": (
+                        f"В 3X-UI не найден inbound "
+                        f"с ID {self.inbound_id}"
+                    ),
+                    "inbound_id": None
+                }
+
+            if (
+                not selected.get("enable", True)
+                or selected.get("protocol") != "vless"
+            ):
+                return {
+                    "success": False,
+                    "error": (
+                        f"Inbound {self.inbound_id} должен быть "
+                        "активным и использовать VLESS"
+                    ),
+                    "inbound_id": None
+                }
+
+            return {
+                "success": True,
+                "error": None,
+                "inbound_id": self.inbound_id
+            }
+
+        candidates = [
+            inbound
+            for inbound in inbounds
+            if (
+                inbound.get("enable", True)
+                and inbound.get("protocol") == "vless"
+            )
+        ]
+
+        if not candidates:
+            return {
+                "success": False,
+                "error": "Не найден активный VLESS inbound в 3X-UI",
+                "inbound_id": None
+            }
+
+        candidates.sort(
+            key=self._get_inbound_clients_count,
+            reverse=True
+        )
+        return {
+            "success": True,
+            "error": None,
+            "inbound_id": candidates[0].get("id")
+        }
+
+    @staticmethod
+    def _get_inbound_clients_count(inbound: dict) -> int:
+        settings_raw = inbound.get("settings", {})
+
+        if isinstance(settings_raw, str):
+            try:
+                settings = json.loads(settings_raw)
+            except json.JSONDecodeError:
+                return 0
+        elif isinstance(settings_raw, dict):
+            settings = settings_raw
+        else:
+            return 0
+
+        clients = settings.get("clients", [])
+        return len(clients) if isinstance(clients, list) else 0
+
+    async def create_client(
+        self,
+        *,
+        email: str,
+        telegram_id: int,
+        devices: int,
+        expiry_time_ms: int
+    ):
+        inbound_result = await self.get_provisioning_inbound_id()
+
+        if not inbound_result["success"]:
+            return {
+                "success": False,
+                "error": inbound_result["error"],
+                "client": None
+            }
+
+        payload = {
+            "client": {
+                "email": email,
+                "limitIp": devices,
+                "totalGB": 0,
+                "expiryTime": expiry_time_ms,
+                "enable": True,
+                "tgId": telegram_id,
+                "comment": "CosmoNet test order",
+                "reset": 0
+            },
+            "inboundIds": [inbound_result["inbound_id"]]
+        }
+        result = await self._request_json(
+            "POST",
+            "/panel/api/clients/add",
+            payload=payload
+        )
+
+        if not result["success"]:
+            return {
+                "success": False,
+                "error": result["error"],
+                "client": None
+            }
+
+        return await self._verify_client_state(
+            email=email,
+            devices=devices,
+            expiry_time_ms=expiry_time_ms
+        )
+
+    async def update_client(
+        self,
+        *,
+        client: dict,
+        devices: int,
+        expiry_time_ms: int
+    ):
+        email = str(client.get("email"))
+        telegram_id = client.get("tg_id", 0)
+
+        if not telegram_id and email.isdigit():
+            telegram_id = int(email)
+
+        payload = {
+            "id": client.get("id", ""),
+            "security": client.get("security", ""),
+            "password": client.get("password", ""),
+            "flow": client.get("flow", ""),
+            "auth": client.get("auth", ""),
+            "email": email,
+            "limitIp": devices,
+            "totalGB": client.get("total_gb", 0),
+            "expiryTime": expiry_time_ms,
+            "enable": True,
+            "tgId": telegram_id,
+            "subId": client.get("sub_id", ""),
+            "comment": client.get("comment", ""),
+            "reset": client.get("reset", 0),
+            "created_at": client.get("created_at", 0)
+        }
+        result = await self._request_json(
+            "POST",
+            f"/panel/api/clients/update/{quote(email, safe='')}",
+            payload=payload
+        )
+
+        if not result["success"]:
+            return {
+                "success": False,
+                "error": result["error"],
+                "client": None
+            }
+
+        return await self._verify_client_state(
+            email=email,
+            devices=devices,
+            expiry_time_ms=expiry_time_ms
+        )
+
+    async def _verify_client_state(
+        self,
+        *,
+        email: str,
+        devices: int,
+        expiry_time_ms: int
+    ):
+        result = await self.get_client_by_email(email)
+
+        if not result["success"]:
+            return result
+
+        client = result["client"]
+
+        if not client:
+            return {
+                "success": False,
+                "error": "Клиент не найден после операции 3X-UI",
+                "client": None
+            }
+
+        if (
+            not client.get("enable")
+            or client.get("limit_ip") != devices
+            or client.get("expiry_time") != expiry_time_ms
+        ):
+            return {
+                "success": False,
+                "error": "3X-UI не применил параметры подписки",
+                "client": client
+            }
+
+        return {
+            "success": True,
+            "error": None,
+            "client": client
         }
 
 

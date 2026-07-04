@@ -1,12 +1,26 @@
+from html import escape
+
 from aiogram import Router, F
 from aiogram.filters import CommandStart
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    Message,
+    ReplyKeyboardMarkup,
+)
 from services.subscription_service import SubscriptionService
 from services.tariff_service import TARIFFS, get_tariff_by_button_text
-from database import add_user_if_not_exists
+from services.test_payment_service import TestPaymentService
+from database import add_user_if_not_exists, is_registered_user
 from keyboards.main_menu import main_menu
 from services.xui_service import XUIService, format_bytes, format_expiry_time
-from config import XUI_SUB_BASE_URL
+from config import (
+    ADMIN_IDS,
+    TEST_PAYMENTS_ENABLED,
+    XUI_SUB_BASE_URL,
+)
 
 router = Router()
 
@@ -45,6 +59,24 @@ tariff_menu = ReplyKeyboardMarkup(
     resize_keyboard=True,
     input_field_placeholder="Выберите тариф"
 )
+
+
+def test_payment_keyboard(order_id: int):
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(
+                text="🧪 Подтвердить тестовую оплату",
+                callback_data=f"test_pay:{order_id}"
+            )
+        ]]
+    )
+
+
+def can_use_test_payments(telegram_id: int) -> bool:
+    return (
+        telegram_id in ADMIN_IDS
+        or TEST_PAYMENTS_ENABLED
+    )
 
 
 @router.message(CommandStart())
@@ -245,6 +277,16 @@ async def select_tariff(message: Message):
     if not tariff:
         return
 
+    if (
+        TEST_PAYMENTS_ENABLED
+        and message.from_user.id not in ADMIN_IDS
+        and not is_registered_user(message.from_user.id)
+    ):
+        await message.answer(
+            "Сначала зарегистрируйтесь в боте командой /start."
+        )
+        return
+
     service = SubscriptionService()
     result = await service.get_purchase_action(message.from_user.id)
 
@@ -266,14 +308,128 @@ async def select_tariff(message: Message):
             "с выбранным лимитом устройств."
         )
 
+    reply_markup = tariff_menu
+    test_payment_text = "Платёжная система пока не подключена."
+
+    if (
+        can_use_test_payments(message.from_user.id)
+        and (
+            message.from_user.id in ADMIN_IDS
+            or is_registered_user(message.from_user.id)
+        )
+    ):
+        payment_service = TestPaymentService(service)
+        order = payment_service.create_order(
+            telegram_id=message.from_user.id,
+            tariff=tariff,
+            purchase_result=result
+        )
+        reply_markup = test_payment_keyboard(order["id"])
+        test_payment_text = (
+            "🧪 <b>Тестовый режим:</b> деньги не списываются.\n"
+            "Подтверждение изменит реальный профиль в 3X-UI."
+        )
+
     await message.answer(
         f"{tariff.emoji} <b>Тариф {tariff.name}</b>\n\n"
         "━━━━━━━━━━━━━━\n\n"
         f"📱 <b>Устройств:</b> {tariff.devices}\n"
+        f"📅 <b>Срок:</b> {tariff.duration_days} дней\n"
         "💰 <b>Стоимость:</b> уточняется\n\n"
         f"{action_text}\n\n"
-        "Платёжная система пока не подключена.",
-        reply_markup=tariff_menu
+        f"{test_payment_text}",
+        reply_markup=reply_markup
+    )
+
+
+@router.callback_query(F.data.startswith("test_pay:"))
+async def confirm_test_payment(callback: CallbackQuery):
+    if not can_use_test_payments(callback.from_user.id):
+        await callback.answer(
+            "Тестовый режим оплаты отключён.",
+            show_alert=True
+        )
+        return
+
+    if (
+        callback.from_user.id not in ADMIN_IDS
+        and not is_registered_user(callback.from_user.id)
+    ):
+        await callback.answer(
+            "Сначала запустите бота командой /start.",
+            show_alert=True
+        )
+        return
+
+    try:
+        order_id = int(callback.data.split(":", 1)[1])
+    except (AttributeError, ValueError):
+        await callback.answer("Некорректный тестовый заказ.", show_alert=True)
+        return
+
+    payment_service = TestPaymentService()
+    order = payment_service.get_order(order_id)
+
+    if not order or order["telegram_id"] != callback.from_user.id:
+        await callback.answer("Тестовый заказ не найден.", show_alert=True)
+        return
+
+    await callback.answer("Обрабатываю тестовую оплату…")
+
+    if callback.message:
+        await callback.message.edit_reply_markup(reply_markup=None)
+
+    result = await payment_service.confirm_order(order_id)
+
+    if not callback.message:
+        return
+
+    if not result["success"]:
+        retry_markup = (
+            test_payment_keyboard(order_id)
+            if result["status"] == "failed"
+            else None
+        )
+        await callback.message.answer(
+            "❌ <b>Тестовая оплата не завершена</b>\n\n"
+            f"Ошибка: {escape(str(result['error']))}",
+            reply_markup=retry_markup
+        )
+        return
+
+    client = result["client"]
+    sub_id = client.get("sub_id") if client else None
+    expiry_text = (
+        format_expiry_time(client.get("expiry_time"))
+        if client
+        else "—"
+    )
+    config_url = None
+
+    if XUI_SUB_BASE_URL and sub_id:
+        config_url = (
+            f"{XUI_SUB_BASE_URL.rstrip('/')}/sub/{sub_id}"
+        )
+
+    config_text = (
+        f"\n\n🔗 <b>VPN-конфиг:</b>\n<code>{config_url}</code>"
+        if config_url
+        else "\n\n⚠️ Ссылка конфигурации пока недоступна."
+    )
+    status_text = (
+        "уже была обработана"
+        if result["status"] == "already_paid"
+        else "успешно подтверждена"
+    )
+
+    await callback.message.answer(
+        "✅ <b>Тестовая оплата "
+        f"{status_text}</b>\n\n"
+        f"📦 Заказ: <code>#{order_id}</code>\n"
+        f"📱 Устройств: <b>{result['order']['devices']}</b>\n"
+        f"📅 Действует до: <b>{expiry_text}</b>"
+        f"{config_text}",
+        reply_markup=subscription_menu
     )
 
 

@@ -18,3 +18,14 @@ ADMIN_IDS = [
 XUI_BASE_URL = os.getenv("XUI_BASE_URL")
 XUI_API_TOKEN = os.getenv("XUI_API_TOKEN")
 XUI_SUB_BASE_URL = os.getenv("XUI_SUB_BASE_URL")
+XUI_INBOUND_ID_RAW = os.getenv("XUI_INBOUND_ID", "")
+XUI_INBOUND_ID = (
+    int(XUI_INBOUND_ID_RAW)
+    if XUI_INBOUND_ID_RAW.isdigit()
+    else None
+)
+
+TEST_PAYMENTS_ENABLED = os.getenv(
+    "TEST_PAYMENTS_ENABLED",
+    "false"
+).strip().lower() in {"1", "true", "yes", "on"}

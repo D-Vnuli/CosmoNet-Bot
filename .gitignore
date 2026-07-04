@@ -17,3 +17,6 @@ logs/
 # Database
 database/*.db
 database/*.sqlite3
+database/*-journal
+database/*.db-wal
+database/*.db-shm
