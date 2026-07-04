@@ -5,10 +5,13 @@ from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 
 from config import BOT_TOKEN
+from database import init_db
 from handlers.menu import router as menu_router
 
 
 async def main():
+    init_db()
+
     bot = Bot(
         token=BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)

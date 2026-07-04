@@ -1,20 +1,12 @@
 from aiogram import Router, F
+from aiogram.filters import CommandStart
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 
+from database import add_user_if_not_exists, get_user
 from keyboards.main_menu import main_menu
 
 router = Router()
 
-from aiogram.filters import CommandStart
-
-
-@router.message(CommandStart())
-async def start_handler(message: Message):
-    await message.answer(
-        "🌌 <b>Добро пожаловать в CosmoNet!</b>\n\n"
-        "Выберите раздел:",
-        reply_markup=main_menu
-    )
 
 subscription_menu = ReplyKeyboardMarkup(
     keyboard=[
@@ -22,7 +14,8 @@ subscription_menu = ReplyKeyboardMarkup(
         [KeyboardButton(text="🛒 Купить / продлить")],
         [KeyboardButton(text="⬅️ Главное меню")]
     ],
-    resize_keyboard=True
+    resize_keyboard=True,
+    input_field_placeholder="Выберите действие"
 )
 
 
@@ -33,25 +26,70 @@ info_menu = ReplyKeyboardMarkup(
         [KeyboardButton(text="📱 Какие приложения использовать")],
         [KeyboardButton(text="⬅️ Главное меню")]
     ],
-    resize_keyboard=True
+    resize_keyboard=True,
+    input_field_placeholder="Выберите раздел"
 )
+
+
+@router.message(CommandStart())
+async def start_handler(message: Message):
+    add_user_if_not_exists(
+        telegram_id=message.from_user.id,
+        username=message.from_user.username,
+        first_name=message.from_user.first_name
+    )
+
+    await message.answer(
+        "🌌 <b>Добро пожаловать в CosmoNet</b>\n\n"
+        "Быстрый, стабильный и удобный VPN-доступ без лишних настроек.\n\n"
+        "━━━━━━━━━━━━━━\n\n"
+        "🚀 <b>Что доступно сейчас:</b>\n\n"
+        "💳 Управление подпиской\n"
+        "ℹ️ Информация по подключению\n"
+        "📱 Рекомендации по приложениям\n\n"
+        "━━━━━━━━━━━━━━\n\n"
+        "Выберите нужный раздел ниже 👇",
+        reply_markup=main_menu
+    )
 
 
 @router.message(F.text == "💳 Подписка")
 async def subscription(message: Message):
     await message.answer(
-        "💳 <b>Подписка</b>\n\n"
-        "Здесь можно посмотреть статус подписки или купить/продлить доступ.",
+        "💳 <b>Подписка CosmoNet</b>\n\n"
+        "━━━━━━━━━━━━━━\n\n"
+        "Здесь можно посмотреть текущий статус подписки, "
+        "а также купить или продлить доступ.\n\n"
+        "Выберите действие ниже:",
         reply_markup=subscription_menu
     )
 
 
 @router.message(F.text == "📊 Статус подписки")
 async def subscription_status(message: Message):
+    user = get_user(message.from_user.id)
+
+    if not user:
+        await message.answer(
+            "Пользователь не найден. Нажмите /start для регистрации."
+        )
+        return
+
+    _, username, first_name, registered_at, status, subscription_until, tariff = user
+
+    status_text = "🟢 активна" if status == "active" else "🔴 не активна"
+    tariff_text = tariff if tariff else "отсутствует"
+    until_text = subscription_until if subscription_until else "—"
+
     await message.answer(
         "📊 <b>Статус подписки</b>\n\n"
-        "Статус: не активна\n"
-        "Дата окончания: отсутствует"
+        "━━━━━━━━━━━━━━\n\n"
+        f"{status_text}\n"
+        f"📦 <b>Тариф:</b> {tariff_text}\n"
+        f"📅 <b>Действует до:</b> {until_text}\n\n"
+        "━━━━━━━━━━━━━━\n\n"
+        f"👤 <b>Пользователь:</b> {first_name or '—'}\n"
+        f"🆔 <b>Telegram ID:</b> {message.from_user.id}"
     )
 
 
@@ -59,7 +97,9 @@ async def subscription_status(message: Message):
 async def buy_subscription(message: Message):
     await message.answer(
         "🛒 <b>Купить / продлить подписку</b>\n\n"
-        "Скоро здесь будет выбор тарифа и оплата."
+        "━━━━━━━━━━━━━━\n\n"
+        "Скоро здесь появится выбор тарифа и автоматическая оплата.\n\n"
+        "Пока бот находится в разработке."
     )
 
 
@@ -67,6 +107,8 @@ async def buy_subscription(message: Message):
 async def info(message: Message):
     await message.answer(
         "ℹ️ <b>INFO</b>\n\n"
+        "━━━━━━━━━━━━━━\n\n"
+        "Здесь собрана основная информация по использованию CosmoNet.\n\n"
         "Выберите нужный раздел:",
         reply_markup=info_menu
     )
@@ -76,10 +118,14 @@ async def info(message: Message):
 async def how_to_get_subscription(message: Message):
     await message.answer(
         "🔑 <b>Как получить подписку</b>\n\n"
-        "1. Перейдите в раздел «Подписка».\n"
-        "2. Нажмите «Купить / продлить».\n"
-        "3. Выберите тариф.\n"
-        "4. После оплаты бот выдаст VPN-конфиг."
+        "━━━━━━━━━━━━━━\n\n"
+        "1. Откройте раздел «💳 Подписка».\n"
+        "2. Нажмите «🛒 Купить / продлить».\n"
+        "3. Выберите подходящий тариф.\n"
+        "4. Оплатите подписку.\n"
+        "5. После оплаты бот выдаст VPN-конфиг.\n\n"
+        "━━━━━━━━━━━━━━\n\n"
+        "Автоматическая покупка будет добавлена позже."
     )
 
 
@@ -87,11 +133,15 @@ async def how_to_get_subscription(message: Message):
 async def how_to_connect_config(message: Message):
     await message.answer(
         "⚙️ <b>Как подключить конфиг</b>\n\n"
-        "1. Скопируйте или скачайте конфиг из бота.\n"
-        "2. Откройте приложение для VPN.\n"
+        "━━━━━━━━━━━━━━\n\n"
+        "1. Получите VPN-конфиг в боте.\n"
+        "2. Установите подходящее приложение.\n"
         "3. Нажмите «Добавить» или «Импорт».\n"
-        "4. Вставьте конфиг.\n"
-        "5. Нажмите «Подключиться»."
+        "4. Вставьте или импортируйте конфиг.\n"
+        "5. Сохраните подключение.\n"
+        "6. Нажмите «Подключиться».\n\n"
+        "━━━━━━━━━━━━━━\n\n"
+        "После этого устройство будет подключено к CosmoNet."
     )
 
 
@@ -99,16 +149,24 @@ async def how_to_connect_config(message: Message):
 async def apps(message: Message):
     await message.answer(
         "📱 <b>Какие приложения использовать</b>\n\n"
-        "Android: v2rayNG, Hiddify, NekoBox\n"
-        "iOS: Streisand, FoXray, Shadowrocket\n"
-        "Windows: Hiddify, Nekoray\n"
-        "macOS: Hiddify, FoXray"
+        "━━━━━━━━━━━━━━\n\n"
+        "🤖 <b>Android:</b>\n"
+        "v2rayNG, Hiddify, NekoBox\n\n"
+        "🍏 <b>iOS:</b>\n"
+        "Streisand, FoXray, Shadowrocket\n\n"
+        "🪟 <b>Windows:</b>\n"
+        "Hiddify, Nekoray\n\n"
+        "💻 <b>macOS:</b>\n"
+        "Hiddify, FoXray\n\n"
+        "━━━━━━━━━━━━━━\n\n"
+        "Позже добавим подробные инструкции для каждой платформы."
     )
 
 
 @router.message(F.text == "⬅️ Главное меню")
 async def back_to_main(message: Message):
     await message.answer(
-        "🌌 Главное меню CosmoNet",
+        "🌌 <b>Главное меню CosmoNet</b>\n\n"
+        "Выберите нужный раздел ниже:",
         reply_markup=main_menu
     )
