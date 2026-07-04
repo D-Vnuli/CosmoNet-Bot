@@ -1,7 +1,7 @@
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
-
+from services.xui_service import XUIService
 from config import ADMIN_IDS
 from database import get_all_users, get_users_stats
 from keyboards.main_menu import main_menu
@@ -13,6 +13,7 @@ admin_menu = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="📊 Админ: статистика")],
         [KeyboardButton(text="👥 Админ: пользователи")],
+        [KeyboardButton(text="🔌 Тест 3X-UI")],
         [KeyboardButton(text="⬅️ Главное меню")]
     ],
     resize_keyboard=True,
@@ -84,3 +85,29 @@ async def admin_users(message: Message):
         )
 
     await message.answer(text)
+
+@router.message(F.text == "🔌 Тест 3X-UI")
+@router.message(Command("xui_test"))
+async def xui_test(message: Message):
+    if not is_admin(message):
+        return
+
+    xui = XUIService()
+    result = await xui.get_inbounds()
+
+    if not result["success"]:
+        await message.answer(
+            "🔌 <b>Тест 3X-UI</b>\n\n"
+            "━━━━━━━━━━━━━━\n\n"
+            f"❌ Ошибка: {result['error']}"
+        )
+        return
+
+    inbounds = result["inbounds"]
+
+    await message.answer(
+        "🔌 <b>Тест 3X-UI</b>\n\n"
+        "━━━━━━━━━━━━━━\n\n"
+        "✅ Подключение успешно\n"
+        f"📡 Найдено inbound'ов: <b>{len(inbounds)}</b>"
+    )

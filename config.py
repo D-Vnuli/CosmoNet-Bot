@@ -14,3 +14,6 @@ ADMIN_IDS = [
     for admin_id in ADMIN_IDS_RAW.split(",")
     if admin_id.strip().isdigit()
 ]
+
+XUI_BASE_URL = os.getenv("XUI_BASE_URL")
+XUI_API_TOKEN = os.getenv("XUI_API_TOKEN")
