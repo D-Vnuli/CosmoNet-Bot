@@ -17,3 +17,4 @@ ADMIN_IDS = [
 
 XUI_BASE_URL = os.getenv("XUI_BASE_URL")
 XUI_API_TOKEN = os.getenv("XUI_API_TOKEN")
+XUI_SUB_BASE_URL = os.getenv("XUI_SUB_BASE_URL")

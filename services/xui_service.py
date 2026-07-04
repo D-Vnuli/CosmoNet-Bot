@@ -101,6 +101,7 @@ class XUIService:
                         "client": {
                             "email": client.get("email"),
                             "id": client.get("id"),
+                            "sub_id": client.get("subId"),
                             "enable": client.get("enable", False),
                             "expiry_time": client.get("expiryTime"),
                             "total_gb": client.get("totalGB", 0),

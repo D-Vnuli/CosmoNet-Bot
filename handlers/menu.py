@@ -1,10 +1,11 @@
 from aiogram import Router, F
 from aiogram.filters import CommandStart
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
-
+from services.subscription_service import SubscriptionService
 from database import add_user_if_not_exists
 from keyboards.main_menu import main_menu
 from services.xui_service import XUIService, format_bytes, format_expiry_time
+from config import XUI_SUB_BASE_URL
 
 router = Router()
 
@@ -12,6 +13,7 @@ router = Router()
 subscription_menu = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="📊 Статус подписки")],
+        [KeyboardButton(text="🔗 Получить конфиг")],
         [KeyboardButton(text="🛒 Купить / продлить")],
         [KeyboardButton(text="⬅️ Главное меню")]
     ],
@@ -100,7 +102,6 @@ async def subscription_status(message: Message):
     expiry_text = format_expiry_time(client["expiry_time"])
 
     used_traffic = client["up"] + client["down"]
-
     used_text = format_bytes(used_traffic)
 
     devices_limit = client.get("limit_ip", 0)
@@ -118,13 +119,102 @@ async def subscription_status(message: Message):
     )
 
 
+@router.message(F.text == "🔗 Получить конфиг")
+async def get_config(message: Message):
+    telegram_id = str(message.from_user.id)
+
+    xui = XUIService()
+    result = await xui.get_client_by_email(telegram_id)
+
+    if not result["success"]:
+        await message.answer(
+            "🔗 <b>Получить конфиг</b>\n\n"
+            "━━━━━━━━━━━━━━\n\n"
+            "❌ Не удалось получить данные из 3X-UI.\n\n"
+            f"Ошибка: {result['error']}"
+        )
+        return
+
+    client = result["client"]
+
+    if not client:
+        await message.answer(
+            "🔗 <b>Получить конфиг</b>\n\n"
+            "━━━━━━━━━━━━━━\n\n"
+            "🔴 VPN-конфиг не найден.\n\n"
+            "Если вы уже оплатили подписку, обратитесь в поддержку."
+        )
+        return
+
+    if not client["enable"]:
+        await message.answer(
+            "🔗 <b>Получить конфиг</b>\n\n"
+            "━━━━━━━━━━━━━━\n\n"
+            "🔴 Ваша подписка отключена.\n\n"
+            "Продлите доступ, чтобы снова использовать VPN."
+        )
+        return
+
+    sub_id = client.get("sub_id")
+
+    if not sub_id:
+        await message.answer(
+            "🔗 <b>Получить конфиг</b>\n\n"
+            "━━━━━━━━━━━━━━\n\n"
+            "❌ У пользователя не найден Sub ID в 3X-UI."
+        )
+        return
+
+    base_url = XUI_SUB_BASE_URL.rstrip("/") if XUI_SUB_BASE_URL else ""
+
+    if not base_url:
+        await message.answer(
+            "🔗 <b>Получить конфиг</b>\n\n"
+            "━━━━━━━━━━━━━━\n\n"
+            "❌ В .env не настроен XUI_SUB_BASE_URL."
+        )
+        return
+
+    config_url = f"{base_url}/sub/{sub_id}"
+
+    await message.answer(
+        "🔗 <b>Ваш VPN-конфиг CosmoNet</b>\n\n"
+        "━━━━━━━━━━━━━━\n\n"
+        "Скопируйте ссылку ниже и импортируйте её в приложение для VPN:\n\n"
+        f"<code>{config_url}</code>\n\n"
+        "━━━━━━━━━━━━━━\n\n"
+        "Не передавайте эту ссылку другим людям."
+    )
+
 @router.message(F.text == "🛒 Купить / продлить")
 async def buy_subscription(message: Message):
+    service = SubscriptionService()
+    result = await service.get_purchase_action(message.from_user.id)
+
+    if not result["success"]:
+        await message.answer(
+            "🛒 <b>Купить / продлить подписку</b>\n\n"
+            "━━━━━━━━━━━━━━\n\n"
+            "❌ Не удалось проверить данные в VPN-панели.\n\n"
+            f"Ошибка: {result['error']}"
+        )
+        return
+
+    if result["action"] == "renew":
+        await message.answer(
+            "🛒 <b>Продление подписки</b>\n\n"
+            "━━━━━━━━━━━━━━\n\n"
+            "Ваш VPN-профиль уже найден в системе.\n\n"
+            "Новый конфиг создаваться не будет.\n"
+            "После оплаты будет продлена текущая подписка."
+        )
+        return
+
     await message.answer(
-        "🛒 <b>Купить / продлить подписку</b>\n\n"
+        "🛒 <b>Первая покупка подписки</b>\n\n"
         "━━━━━━━━━━━━━━\n\n"
-        "Скоро здесь появится выбор тарифа и автоматическая оплата.\n\n"
-        "Пока бот находится в разработке."
+        "Ваш VPN-профиль пока не найден.\n\n"
+        "После оплаты бот создаст новый VPN-конфиг и выдаст его вам."
     )
 
 
