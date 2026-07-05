@@ -31,8 +31,9 @@ class FakeCallback:
         self.message = Mock()
         self.message.edit_reply_markup = AsyncMock()
         self.message.answer = AsyncMock()
+        self.message.answer_invoice = AsyncMock()
 
-    async def answer(self, text, **kwargs):
+    async def answer(self, text=None, **kwargs):
         self.answers.append((text, kwargs))
 
 
@@ -100,11 +101,6 @@ class TariffTests(unittest.IsolatedAsyncioTestCase):
             "error": None,
             "client": {"enable": True}
         })
-        stars_service = Mock()
-        stars_service.create_order = Mock(return_value={
-            "id": 7,
-            "invoice_payload": "cosmonet-stars:7"
-        })
 
         with (
             patch.object(menu, "TEST_PAYMENTS_ENABLED", False),
@@ -113,11 +109,6 @@ class TariffTests(unittest.IsolatedAsyncioTestCase):
                 menu,
                 "SubscriptionService",
                 return_value=service
-            ),
-            patch.object(
-                menu,
-                "StarsPaymentService",
-                return_value=stars_service
             )
         ):
             await menu.select_tariff(message)
@@ -125,16 +116,14 @@ class TariffTests(unittest.IsolatedAsyncioTestCase):
         text, kwargs = message.answers[0]
         self.assertIn("Тариф Standard", text)
         self.assertIn("Устройств:</b> 3", text)
-        self.assertIn("199 ₽ или 119 ⭐", text)
-        self.assertIn("счёт Telegram Stars", text)
-        self.assertIs(kwargs["reply_markup"], menu.tariff_menu)
-        self.assertEqual(len(message.invoices), 1)
-        self.assertEqual(message.invoices[0]["currency"], "XTR")
-        self.assertEqual(message.invoices[0]["prices"][0].amount, 119)
+        self.assertIn("Стоимость:</b> 199 ₽", text)
+        self.assertIn("Выберите способ оплаты", text)
+        buttons = kwargs["reply_markup"].inline_keyboard[0]
         self.assertEqual(
-            message.invoices[0]["payload"],
-            "cosmonet-stars:7"
+            [button.callback_data for button in buttons],
+            ["pay_stars:standard", "pay_card:standard"]
         )
+        self.assertEqual(message.invoices, [])
 
     async def test_registered_user_can_create_test_order(self):
         tariff = TARIFFS[2]
@@ -148,11 +137,6 @@ class TariffTests(unittest.IsolatedAsyncioTestCase):
         })
         payment_service = Mock()
         payment_service.create_order = Mock(return_value={"id": 31})
-        stars_service = Mock()
-        stars_service.create_order = Mock(return_value={
-            "id": 30,
-            "invoice_payload": "cosmonet-stars:30"
-        })
 
         with (
             patch.object(menu, "ADMIN_IDS", [42]),
@@ -167,18 +151,13 @@ class TariffTests(unittest.IsolatedAsyncioTestCase):
                 menu,
                 "TestPaymentService",
                 return_value=payment_service
-            ),
-            patch.object(
-                menu,
-                "StarsPaymentService",
-                return_value=stars_service
             )
         ):
             await menu.select_tariff(message)
 
         text, kwargs = message.answers[0]
-        button = kwargs["reply_markup"].inline_keyboard[0][0]
-        self.assertIn("деньги не списываются", text)
+        button = kwargs["reply_markup"].inline_keyboard[1][0]
+        self.assertIn("доступна тестовая оплата", text)
         self.assertEqual(button.callback_data, "test_pay:31")
 
     async def test_registered_user_can_confirm_own_test_order(self):
@@ -235,11 +214,6 @@ class TariffTests(unittest.IsolatedAsyncioTestCase):
         })
         payment_service = Mock()
         payment_service.create_order = Mock(return_value={"id": 17})
-        stars_service = Mock()
-        stars_service.create_order = Mock(return_value={
-            "id": 16,
-            "invoice_payload": "cosmonet-stars:16"
-        })
 
         with (
             patch.object(menu, "ADMIN_IDS", [42]),
@@ -253,18 +227,13 @@ class TariffTests(unittest.IsolatedAsyncioTestCase):
                 menu,
                 "TestPaymentService",
                 return_value=payment_service
-            ),
-            patch.object(
-                menu,
-                "StarsPaymentService",
-                return_value=stars_service
             )
         ):
             await menu.select_tariff(message)
 
         text, kwargs = message.answers[0]
-        button = kwargs["reply_markup"].inline_keyboard[0][0]
-        self.assertIn("деньги не списываются", text)
+        button = kwargs["reply_markup"].inline_keyboard[1][0]
+        self.assertIn("доступна тестовая оплата", text)
         self.assertEqual(button.callback_data, "test_pay:17")
 
     async def test_admin_can_confirm_test_order(self):

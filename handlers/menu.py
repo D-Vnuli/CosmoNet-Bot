@@ -1,7 +1,10 @@
 from html import escape
 
 from aiogram import Router, F
+from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command, CommandStart
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
@@ -13,7 +16,11 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
 )
 from services.subscription_service import SubscriptionService
-from services.tariff_service import TARIFFS, get_tariff_by_button_text
+from services.tariff_service import (
+    TARIFFS,
+    get_tariff_by_button_text,
+    get_tariff_by_code,
+)
 from services.stars_payment_service import StarsPaymentService
 from services.test_payment_service import TestPaymentService
 from database import add_user_if_not_exists, is_registered_user
@@ -29,11 +36,15 @@ from config import (
 router = Router()
 
 
+class FeedbackStates(StatesGroup):
+    waiting_message = State()
+
+
 subscription_menu = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="📊 Статус подписки")],
-        [KeyboardButton(text="🔗 Получить конфиг")],
         [KeyboardButton(text="🛒 Купить / продлить")],
+        [KeyboardButton(text="🔗 Получить конфиг")],
         [KeyboardButton(text="⬅️ Главное меню")]
     ],
     resize_keyboard=True,
@@ -46,6 +57,7 @@ info_menu = ReplyKeyboardMarkup(
         [KeyboardButton(text="🔑 Как получить подписку")],
         [KeyboardButton(text="⚙️ Как подключить конфиг")],
         [KeyboardButton(text="📱 Какие приложения использовать")],
+        [KeyboardButton(text="💬 Обратная связь")],
         [KeyboardButton(text="⬅️ Главное меню")]
     ],
     resize_keyboard=True,
@@ -65,6 +77,15 @@ tariff_menu = ReplyKeyboardMarkup(
 )
 
 
+feedback_cancel_menu = ReplyKeyboardMarkup(
+    keyboard=[[
+        KeyboardButton(text="❌ Отменить обращение")
+    ]],
+    resize_keyboard=True,
+    input_field_placeholder="Напишите сообщение или отправьте скриншот"
+)
+
+
 def test_payment_keyboard(order_id: int):
     return InlineKeyboardMarkup(
         inline_keyboard=[[
@@ -74,6 +95,32 @@ def test_payment_keyboard(order_id: int):
             )
         ]]
     )
+
+
+def payment_method_keyboard(
+    tariff_code: str,
+    test_order_id: int | None = None
+):
+    keyboard = [[
+        InlineKeyboardButton(
+            text="⭐ Telegram Stars",
+            callback_data=f"pay_stars:{tariff_code}"
+        ),
+        InlineKeyboardButton(
+            text="💳 Карта",
+            callback_data=f"pay_card:{tariff_code}"
+        )
+    ]]
+
+    if test_order_id is not None:
+        keyboard.append([
+            InlineKeyboardButton(
+                text="🧪 Тестовая оплата",
+                callback_data=f"test_pay:{test_order_id}"
+            )
+        ])
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 def stars_retry_keyboard(order_id: int):
@@ -95,7 +142,8 @@ def can_use_test_payments(telegram_id: int) -> bool:
 
 
 @router.message(CommandStart())
-async def start_handler(message: Message):
+async def start_handler(message: Message, state: FSMContext):
+    await state.clear()
     add_user_if_not_exists(
         telegram_id=message.from_user.id,
         username=message.from_user.username,
@@ -154,6 +202,115 @@ async def payment_terms(message: Message):
         "является продавцом услуги и не обрабатывает обращения по покупке.\n\n"
         "Нажимая кнопку оплаты, пользователь подтверждает, что прочитал "
         "и принимает эти условия."
+    )
+
+
+@router.message(F.text == "💬 Обратная связь")
+async def feedback_start(message: Message, state: FSMContext):
+    await state.set_state(FeedbackStates.waiting_message)
+    await message.answer(
+        "💬 <b>Обратная связь</b>\n\n"
+        "Одним сообщением опишите вопрос, предложение или проблему. "
+        "Можно отправить текст либо один скриншот с подписью.\n\n"
+        "Администратор увидит ваш Telegram-аккаунт и сможет связаться "
+        "с вами.",
+        reply_markup=feedback_cancel_menu
+    )
+
+
+@router.message(
+    FeedbackStates.waiting_message,
+    Command("cancel")
+)
+@router.message(
+    FeedbackStates.waiting_message,
+    F.text == "❌ Отменить обращение"
+)
+async def feedback_cancel(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer(
+        "Обращение отменено.",
+        reply_markup=info_menu
+    )
+
+
+@router.message(
+    FeedbackStates.waiting_message,
+    F.media_group_id
+)
+async def feedback_reject_album(message: Message):
+    await message.answer(
+        "Отправьте только один скриншот, не альбом."
+    )
+
+
+@router.message(
+    FeedbackStates.waiting_message,
+    F.text | F.photo
+)
+async def feedback_receive(message: Message, state: FSMContext):
+    if not ADMIN_IDS:
+        await message.answer(
+            "Сейчас обратная связь недоступна: "
+            "контакт администратора не настроен."
+        )
+        return
+
+    user = message.from_user
+    username = (
+        f"@{escape(user.username)}"
+        if user.username
+        else "не указан"
+    )
+    full_name = escape(user.full_name or "Без имени")
+    profile_keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(
+                text="👤 Открыть профиль",
+                url=f"tg://user?id={user.id}"
+            )
+        ]]
+    )
+    header = (
+        "💬 <b>Новое обращение CosmoNet</b>\n\n"
+        f"👤 <b>Пользователь:</b> "
+        f'<a href="tg://user?id={user.id}">{full_name}</a>\n'
+        f"🔹 <b>Username:</b> {username}\n"
+        f"🆔 <b>Telegram ID:</b> <code>{user.id}</code>\n\n"
+        "Сообщение пользователя ниже:"
+    )
+    delivered = 0
+
+    for admin_id in ADMIN_IDS:
+        try:
+            await message.bot.send_message(
+                chat_id=admin_id,
+                text=header,
+                reply_markup=profile_keyboard
+            )
+            await message.copy_to(chat_id=admin_id)
+            delivered += 1
+        except TelegramAPIError:
+            continue
+
+    if delivered == 0:
+        await message.answer(
+            "Не удалось передать обращение. Попробуйте немного позже."
+        )
+        return
+
+    await state.clear()
+    await message.answer(
+        "✅ Сообщение отправлено администратору.\n\n"
+        "Спасибо за обратную связь!",
+        reply_markup=info_menu
+    )
+
+
+@router.message(FeedbackStates.waiting_message)
+async def feedback_reject_content(message: Message):
+    await message.answer(
+        "Поддерживается текст или один скриншот с подписью."
     )
 
 
@@ -349,23 +506,16 @@ async def select_tariff(message: Message):
 
     if result["action"] == "renew":
         action_text = (
-            "После подключения оплаты текущая подписка будет продлена, "
+            "После оплаты текущая подписка будет продлена, "
             "а лимит устройств обновлён согласно тарифу."
         )
     else:
         action_text = (
-            "После подключения оплаты бот создаст VPN-профиль "
+            "После оплаты бот создаст VPN-профиль "
             "с выбранным лимитом устройств."
         )
 
-    payment_service = StarsPaymentService(service)
-    stars_order = payment_service.create_order(
-        telegram_id=message.from_user.id,
-        tariff=tariff,
-        purchase_result=result
-    )
-
-    reply_markup = tariff_menu
+    test_order_id = None
     test_payment_text = ""
 
     if (
@@ -381,10 +531,9 @@ async def select_tariff(message: Message):
             tariff=tariff,
             purchase_result=result
         )
-        reply_markup = test_payment_keyboard(order["id"])
+        test_order_id = order["id"]
         test_payment_text = (
-            "\n\n🧪 <b>Тестовый режим:</b> деньги не списываются.\n"
-            "Подтверждение изменит реальный профиль в 3X-UI."
+            "\n\nАдминистратору также доступна тестовая оплата."
         )
 
     await message.answer(
@@ -392,23 +541,78 @@ async def select_tariff(message: Message):
         "━━━━━━━━━━━━━━\n\n"
         f"📱 <b>Устройств:</b> {tariff.devices}\n"
         f"📅 <b>Срок:</b> {tariff.duration_days} дней\n"
-        f"💰 <b>Стоимость:</b> {tariff.price_text} "
-        f"или {tariff.stars_price_text} за 30 дней\n\n"
+        f"💰 <b>Стоимость:</b> {tariff.price_text} за 30 дней\n\n"
         f"{action_text}\n\n"
-        "Ниже находится защищённый счёт Telegram Stars.\n"
-        "Нажимая кнопку оплаты, вы принимаете /terms."
+        "Выберите способ оплаты:"
         f"{test_payment_text}",
-        reply_markup=reply_markup
+        reply_markup=payment_method_keyboard(
+            tariff.code,
+            test_order_id
+        )
     )
 
-    await message.answer_invoice(
+
+@router.callback_query(F.data.startswith("pay_stars:"))
+async def select_stars_payment(callback: CallbackQuery):
+    tariff_code = callback.data.split(":", 1)[1]
+    tariff = get_tariff_by_code(tariff_code)
+
+    if not tariff:
+        await callback.answer(
+            "Тариф не найден.",
+            show_alert=True
+        )
+        return
+
+    if not is_registered_user(callback.from_user.id):
+        await callback.answer(
+            "Сначала запустите бота командой /start.",
+            show_alert=True
+        )
+        return
+
+    service = SubscriptionService()
+    purchase_result = await service.get_purchase_action(
+        callback.from_user.id
+    )
+
+    if not purchase_result["success"]:
+        await callback.answer(
+            "Не удалось проверить VPN-профиль.",
+            show_alert=True
+        )
+        return
+
+    payment_service = StarsPaymentService(service)
+    order = payment_service.create_order(
+        telegram_id=callback.from_user.id,
+        tariff=tariff,
+        purchase_result=purchase_result
+    )
+
+    await callback.answer()
+
+    if not callback.message:
+        return
+
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer(
+        f"⭐ <b>Оплата Telegram Stars</b>\n\n"
+        f"{tariff.emoji} Тариф: <b>{tariff.name}</b>\n"
+        f"📱 Устройств: <b>{tariff.devices}</b>\n"
+        f"📅 Срок: <b>{tariff.duration_days} дней</b>\n"
+        f"⭐ К оплате: <b>{tariff.stars_price_text}</b>\n\n"
+        "Нажимая кнопку оплаты в счёте ниже, "
+        "вы принимаете /terms."
+    )
+    await callback.message.answer_invoice(
         title=f"CosmoNet — тариф {tariff.name}",
         description=(
             f"VPN-подписка на {tariff.duration_days} дней, "
             f"устройств: {tariff.devices}. Оплата означает согласие "
             "с условиями /terms."
         ),
-        payload=stars_order["invoice_payload"],
+        payload=order["invoice_payload"],
         currency="XTR",
         prices=[
             LabeledPrice(
@@ -417,8 +621,46 @@ async def select_tariff(message: Message):
             )
         ],
         provider_token="",
-        start_parameter=f"stars_{stars_order['id']}",
+        start_parameter=f"stars_{order['id']}",
         protect_content=True
+    )
+
+
+@router.callback_query(F.data.startswith("pay_card:"))
+async def select_card_payment(callback: CallbackQuery):
+    tariff_code = callback.data.split(":", 1)[1]
+    tariff = get_tariff_by_code(tariff_code)
+
+    if not tariff:
+        await callback.answer(
+            "Тариф не найден.",
+            show_alert=True
+        )
+        return
+
+    await callback.answer()
+
+    if not callback.message:
+        return
+
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer(
+        "💳 <b>Оплата картой</b>\n\n"
+        f"{tariff.emoji} Тариф: <b>{tariff.name}</b>\n"
+        f"📱 Устройств: <b>{tariff.devices}</b>\n"
+        f"📅 Срок: <b>{tariff.duration_days} дней</b>\n"
+        f"💳 К оплате: <b>{tariff.price_text}</b>\n\n"
+        "Оплата банковской картой пока подключается и временно "
+        "недоступна. Сейчас можно оплатить подписку через "
+        "Telegram Stars.",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[
+                InlineKeyboardButton(
+                    text="⭐ Оплатить Telegram Stars",
+                    callback_data=f"pay_stars:{tariff.code}"
+                )
+            ]]
+        )
     )
 
 
@@ -647,10 +889,12 @@ async def back_to_subscription(message: Message):
 @router.message(F.text == "ℹ️ INFO")
 async def info(message: Message):
     await message.answer(
-        "ℹ️ <b>INFO</b>\n\n"
+        "ℹ️ <b>Помощь по CosmoNet</b>\n\n"
         "━━━━━━━━━━━━━━\n\n"
-        "Здесь собрана основная информация по использованию CosmoNet.\n\n"
-        "Выберите нужный раздел:",
+        "Здесь можно быстро узнать, как купить подписку, установить "
+        "приложение и подключить VPN.\n\n"
+        "Если что-то не получилось — напишите через кнопку "
+        "«💬 Обратная связь».",
         reply_markup=info_menu
     )
 
@@ -660,47 +904,57 @@ async def how_to_get_subscription(message: Message):
     await message.answer(
         "🔑 <b>Как получить подписку</b>\n\n"
         "━━━━━━━━━━━━━━\n\n"
-        "1. Откройте раздел «💳 Подписка».\n"
+        "1. Откройте «💳 Подписка».\n"
         "2. Нажмите «🛒 Купить / продлить».\n"
-        "3. Выберите подходящий тариф.\n"
-        "4. Оплатите подписку.\n"
-        "5. После оплаты бот выдаст VPN-конфиг.\n\n"
-        "━━━━━━━━━━━━━━\n\n"
-        "Автоматическая покупка будет добавлена позже."
+        "3. Выберите тариф и способ оплаты.\n"
+        "4. Оплатите счёт.\n"
+        "5. Бот сразу создаст или продлит подписку.\n\n"
+        "Оплата через Telegram Stars уже работает. "
+        "Оплата картой появится позже."
     )
 
 
 @router.message(F.text == "⚙️ Как подключить конфиг")
 async def how_to_connect_config(message: Message):
     await message.answer(
-        "⚙️ <b>Как подключить конфиг</b>\n\n"
+        "⚙️ <b>Как подключить VPN</b>\n\n"
         "━━━━━━━━━━━━━━\n\n"
-        "1. Получите VPN-конфиг в боте.\n"
-        "2. Установите подходящее приложение.\n"
-        "3. Нажмите «Добавить» или «Импорт».\n"
-        "4. Вставьте или импортируйте конфиг.\n"
-        "5. Сохраните подключение.\n"
-        "6. Нажмите «Подключиться».\n\n"
-        "━━━━━━━━━━━━━━\n\n"
-        "После этого устройство будет подключено к CosmoNet."
+        "1. Установите приложение из раздела "
+        "«📱 Какие приложения использовать».\n"
+        "2. Откройте «💳 Подписка» → «🔗 Получить конфиг».\n"
+        "3. Нажмите на ссылку конфига, чтобы скопировать её.\n"
+        "4. В приложении выберите «Добавить из буфера» "
+        "или «Импортировать ссылку».\n"
+        "5. Разрешите создание VPN-подключения и нажмите кнопку запуска.\n\n"
+        "Не передавайте ссылку конфига другим людям."
     )
 
 
 @router.message(F.text == "📱 Какие приложения использовать")
 async def apps(message: Message):
     await message.answer(
-        "📱 <b>Какие приложения использовать</b>\n\n"
+        "📱 <b>Приложения для подключения</b>\n\n"
         "━━━━━━━━━━━━━━\n\n"
         "🤖 <b>Android:</b>\n"
-        "v2rayNG, Hiddify, NekoBox\n\n"
-        "🍏 <b>iOS:</b>\n"
-        "Streisand, FoXray, Shadowrocket\n\n"
+        "• <a href=\"https://play.google.com/store/apps/details?"
+        "id=com.v2raytun.android\">v2RayTun</a> — простой вариант\n"
+        "• <a href=\"https://play.google.com/store/apps/details?"
+        "id=app.hiddify.com\">Hiddify</a> — удобная альтернатива\n\n"
+        "🍏 <b>iPhone и iPad:</b>\n"
+        "• <a href=\"https://apps.apple.com/us/app/streisand/"
+        "id6450534064\">Streisand</a> — рекомендуем\n"
+        "• <a href=\"https://apps.apple.com/us/app/hiddify-proxy-vpn/"
+        "id6596777532\">Hiddify</a> — альтернатива\n\n"
         "🪟 <b>Windows:</b>\n"
-        "Hiddify, Nekoray\n\n"
+        "• <a href=\"https://github.com/hiddify/hiddify-app/releases/"
+        "latest\">Hiddify</a>\n\n"
         "💻 <b>macOS:</b>\n"
-        "Hiddify, FoXray\n\n"
+        "• <a href=\"https://github.com/hiddify/hiddify-app/releases/"
+        "latest\">Hiddify</a>\n\n"
         "━━━━━━━━━━━━━━\n\n"
-        "Позже добавим подробные инструкции для каждой платформы."
+        "После установки скопируйте конфиг из бота и добавьте его "
+        "в приложение через импорт из буфера обмена.",
+        disable_web_page_preview=True
     )
 
 

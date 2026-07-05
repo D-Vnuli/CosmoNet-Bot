@@ -159,6 +159,79 @@ class StarsPaymentServiceTests(unittest.IsolatedAsyncioTestCase):
 
 
 class StarsPaymentHandlerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stars_invoice_is_created_after_method_selection(self):
+        callback = Mock()
+        callback.data = "pay_stars:standard"
+        callback.from_user = SimpleNamespace(id=1001)
+        callback.answer = AsyncMock()
+        callback.message = Mock()
+        callback.message.edit_reply_markup = AsyncMock()
+        callback.message.answer = AsyncMock()
+        callback.message.answer_invoice = AsyncMock()
+        subscription_service = Mock()
+        subscription_service.get_purchase_action = AsyncMock(
+            return_value={
+                "success": True,
+                "action": "create",
+                "error": None,
+                "client": None
+            }
+        )
+        stars_service = Mock()
+        stars_service.create_order = Mock(return_value={
+            "id": 15,
+            "invoice_payload": "cosmonet-stars:15"
+        })
+
+        with (
+            patch.object(
+                menu,
+                "is_registered_user",
+                return_value=True
+            ),
+            patch.object(
+                menu,
+                "SubscriptionService",
+                return_value=subscription_service
+            ),
+            patch.object(
+                menu,
+                "StarsPaymentService",
+                return_value=stars_service
+            )
+        ):
+            await menu.select_stars_payment(callback)
+
+        stars_service.create_order.assert_called_once()
+        invoice = callback.message.answer_invoice.await_args.kwargs
+        self.assertEqual(invoice["currency"], "XTR")
+        self.assertEqual(invoice["prices"][0].amount, 119)
+        self.assertEqual(
+            invoice["payload"],
+            "cosmonet-stars:15"
+        )
+
+    async def test_card_method_reports_that_it_is_unavailable(self):
+        callback = Mock()
+        callback.data = "pay_card:lite"
+        callback.from_user = SimpleNamespace(id=1001)
+        callback.answer = AsyncMock()
+        callback.message = Mock()
+        callback.message.edit_reply_markup = AsyncMock()
+        callback.message.answer = AsyncMock()
+
+        await menu.select_card_payment(callback)
+
+        text = callback.message.answer.await_args.args[0]
+        markup = callback.message.answer.await_args.kwargs[
+            "reply_markup"
+        ]
+        self.assertIn("временно недоступна", text)
+        self.assertEqual(
+            markup.inline_keyboard[0][0].callback_data,
+            "pay_stars:lite"
+        )
+
     async def test_pre_checkout_query_is_answered(self):
         query = Mock()
         query.from_user = SimpleNamespace(id=1001)
