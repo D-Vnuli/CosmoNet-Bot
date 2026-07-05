@@ -69,6 +69,40 @@ def init_db():
             )
         """)
 
+        cursor.execute("PRAGMA table_info(orders)")
+        order_columns = {
+            row[1]
+            for row in cursor.fetchall()
+        }
+        new_order_columns = {
+            "payment_amount": "INTEGER",
+            "currency": "TEXT",
+            "invoice_payload": "TEXT",
+            "telegram_payment_charge_id": "TEXT",
+            "provider_payment_charge_id": "TEXT",
+            "paid_at": "TEXT",
+        }
+
+        for column_name, column_type in new_order_columns.items():
+            if column_name not in order_columns:
+                cursor.execute(
+                    f"ALTER TABLE orders "
+                    f"ADD COLUMN {column_name} {column_type}"
+                )
+
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS
+            idx_orders_invoice_payload
+            ON orders(invoice_payload)
+            WHERE invoice_payload IS NOT NULL
+        """)
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS
+            idx_orders_telegram_payment_charge
+            ON orders(telegram_payment_charge_id)
+            WHERE telegram_payment_charge_id IS NOT NULL
+        """)
+
         conn.commit()
 
 
@@ -296,6 +330,59 @@ def create_test_order(
         return cursor.lastrowid
 
 
+def create_stars_order(
+    *,
+    telegram_id: int,
+    tariff_code: str,
+    devices: int,
+    duration_days: int,
+    action: str,
+    target_expiry_ms: int,
+    payment_amount: int
+) -> int:
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO orders (
+                telegram_id,
+                tariff_code,
+                devices,
+                duration_days,
+                action,
+                provider,
+                status,
+                target_expiry_ms,
+                payment_amount,
+                currency,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, 'telegram_stars', 'pending',
+                    ?, ?, 'XTR', ?, ?)
+        """, (
+            telegram_id,
+            tariff_code,
+            devices,
+            duration_days,
+            action,
+            target_expiry_ms,
+            payment_amount,
+            now,
+            now
+        ))
+        order_id = cursor.lastrowid
+        invoice_payload = f"cosmonet-stars:{order_id}"
+        cursor.execute("""
+            UPDATE orders
+            SET invoice_payload = ?
+            WHERE id = ?
+        """, (invoice_payload, order_id))
+        conn.commit()
+        return order_id
+
+
 def get_order(order_id: int):
     with get_connection() as conn:
         conn.row_factory = sqlite3.Row
@@ -323,6 +410,111 @@ def claim_test_order(order_id: int):
               AND provider = 'test'
               AND status IN ('pending', 'failed')
         """, (now, order_id))
+        conn.commit()
+
+        if cursor.rowcount != 1:
+            return None
+
+    return get_order(order_id)
+
+
+def claim_stars_payment(
+    *,
+    order_id: int,
+    telegram_id: int,
+    currency: str,
+    total_amount: int,
+    telegram_payment_charge_id: str,
+    provider_payment_charge_id: str
+):
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    with get_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        cursor.execute(
+            "SELECT * FROM orders WHERE id = ?",
+            (order_id,)
+        )
+        row = cursor.fetchone()
+
+        if not row:
+            return "not_found", None
+
+        order = dict(row)
+        expected_charge = order["telegram_payment_charge_id"]
+
+        if (
+            order["provider"] != "telegram_stars"
+            or order["telegram_id"] != telegram_id
+            or order["currency"] != currency
+            or order["payment_amount"] != total_amount
+        ):
+            return "invalid", order
+
+        if (
+            expected_charge
+            and expected_charge != telegram_payment_charge_id
+        ):
+            return "invalid", order
+
+        if order["status"] == "paid":
+            return "already_paid", order
+
+        if order["status"] == "processing":
+            return "processing", order
+
+        if (
+            order["status"] == "failed"
+            and expected_charge != telegram_payment_charge_id
+        ):
+            return "invalid", order
+
+        if order["status"] not in {"pending", "failed"}:
+            return "invalid", order
+
+        try:
+            cursor.execute("""
+                UPDATE orders
+                SET status = 'processing',
+                    telegram_payment_charge_id = ?,
+                    provider_payment_charge_id = ?,
+                    paid_at = COALESCE(paid_at, ?),
+                    error = NULL,
+                    updated_at = ?
+                WHERE id = ?
+            """, (
+                telegram_payment_charge_id,
+                provider_payment_charge_id,
+                now,
+                now,
+                order_id
+            ))
+            conn.commit()
+        except sqlite3.IntegrityError:
+            conn.rollback()
+            return "duplicate_payment", get_order(order_id)
+
+    return "claimed", get_order(order_id)
+
+
+def claim_failed_stars_order(order_id: int, telegram_id: int):
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE orders
+            SET status = 'processing',
+                error = NULL,
+                updated_at = ?
+            WHERE id = ?
+              AND telegram_id = ?
+              AND provider = 'telegram_stars'
+              AND telegram_payment_charge_id IS NOT NULL
+              AND status = 'failed'
+        """, (now, order_id, telegram_id))
         conn.commit()
 
         if cursor.rowcount != 1:

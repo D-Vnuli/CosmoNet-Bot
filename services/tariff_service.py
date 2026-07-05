@@ -1,5 +1,11 @@
 from dataclasses import dataclass
 
+from config import (
+    STARS_PRICE_FAMILY,
+    STARS_PRICE_LITE,
+    STARS_PRICE_STANDARD,
+)
+
 
 @dataclass(frozen=True)
 class Tariff:
@@ -8,6 +14,7 @@ class Tariff:
     devices: int
     duration_days: int
     price_rub: int
+    price_stars: int
     emoji: str
 
     @property
@@ -28,6 +35,10 @@ class Tariff:
     def price_text(self) -> str:
         return f"{self.price_rub} ₽"
 
+    @property
+    def stars_price_text(self) -> str:
+        return f"{self.price_stars} ⭐"
+
 
 TARIFFS = (
     Tariff(
@@ -36,6 +47,7 @@ TARIFFS = (
         devices=1,
         duration_days=30,
         price_rub=129,
+        price_stars=STARS_PRICE_LITE,
         emoji="🚀"
     ),
     Tariff(
@@ -44,6 +56,7 @@ TARIFFS = (
         devices=3,
         duration_days=30,
         price_rub=199,
+        price_stars=STARS_PRICE_STANDARD,
         emoji="⚡"
     ),
     Tariff(
@@ -52,6 +65,7 @@ TARIFFS = (
         devices=5,
         duration_days=30,
         price_rub=279,
+        price_stars=STARS_PRICE_FAMILY,
         emoji="👨‍👩‍👧‍👦"
     ),
 )

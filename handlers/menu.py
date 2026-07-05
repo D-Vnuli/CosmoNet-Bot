@@ -1,23 +1,27 @@
 from html import escape
 
 from aiogram import Router, F
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
+    LabeledPrice,
     Message,
+    PreCheckoutQuery,
     ReplyKeyboardMarkup,
 )
 from services.subscription_service import SubscriptionService
 from services.tariff_service import TARIFFS, get_tariff_by_button_text
+from services.stars_payment_service import StarsPaymentService
 from services.test_payment_service import TestPaymentService
 from database import add_user_if_not_exists, is_registered_user
 from keyboards.main_menu import main_menu
 from services.xui_service import XUIService, format_bytes, format_expiry_time
 from config import (
     ADMIN_IDS,
+    PAY_SUPPORT_CONTACT,
     TEST_PAYMENTS_ENABLED,
     XUI_SUB_BASE_URL,
 )
@@ -72,6 +76,17 @@ def test_payment_keyboard(order_id: int):
     )
 
 
+def stars_retry_keyboard(order_id: int):
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(
+                text="🔄 Повторить выдачу подписки",
+                callback_data=f"stars_retry:{order_id}"
+            )
+        ]]
+    )
+
+
 def can_use_test_payments(telegram_id: int) -> bool:
     return (
         telegram_id in ADMIN_IDS
@@ -100,6 +115,45 @@ async def start_handler(message: Message):
         "━━━━━━━━━━━━━━\n\n"
         "Выберите нужный раздел ниже 👇",
         reply_markup=main_menu
+    )
+
+
+@router.message(Command("paysupport"))
+async def payment_support(message: Message):
+    if PAY_SUPPORT_CONTACT:
+        contact_text = escape(PAY_SUPPORT_CONTACT)
+    elif ADMIN_IDS:
+        contact_text = (
+            f'<a href="tg://user?id={ADMIN_IDS[0]}">'
+            "администратор CosmoNet</a>"
+        )
+    else:
+        contact_text = "контакт пока не настроен"
+
+    await message.answer(
+        "🛟 <b>Поддержка по платежам</b>\n\n"
+        "Опишите проблему и обязательно укажите номер заказа "
+        "из сообщения об оплате.\n\n"
+        f"Контакт поддержки: {contact_text}"
+    )
+
+
+@router.message(Command("terms"))
+async def payment_terms(message: Message):
+    await message.answer(
+        "📄 <b>Условия покупки подписки CosmoNet</b>\n\n"
+        "1. Подписка предоставляет VPN-доступ на 30 дней с лимитом "
+        "устройств выбранного тарифа.\n"
+        "2. Доступ создаётся или продлевается сразу после подтверждения "
+        "платежа Telegram.\n"
+        "3. Пользователь обязуется соблюдать применимое законодательство "
+        "и не использовать сервис для противоправных действий.\n"
+        "4. При технической ошибке доступ будет восстановлен либо вопрос "
+        "будет решён через поддержку.\n"
+        "5. По вопросам оплаты используйте /paysupport. Telegram не "
+        "является продавцом услуги и не обрабатывает обращения по покупке.\n\n"
+        "Нажимая кнопку оплаты, пользователь подтверждает, что прочитал "
+        "и принимает эти условия."
     )
 
 
@@ -277,11 +331,7 @@ async def select_tariff(message: Message):
     if not tariff:
         return
 
-    if (
-        TEST_PAYMENTS_ENABLED
-        and message.from_user.id not in ADMIN_IDS
-        and not is_registered_user(message.from_user.id)
-    ):
+    if not is_registered_user(message.from_user.id):
         await message.answer(
             "Сначала зарегистрируйтесь в боте командой /start."
         )
@@ -308,8 +358,15 @@ async def select_tariff(message: Message):
             "с выбранным лимитом устройств."
         )
 
+    payment_service = StarsPaymentService(service)
+    stars_order = payment_service.create_order(
+        telegram_id=message.from_user.id,
+        tariff=tariff,
+        purchase_result=result
+    )
+
     reply_markup = tariff_menu
-    test_payment_text = "Платёжная система пока не подключена."
+    test_payment_text = ""
 
     if (
         can_use_test_payments(message.from_user.id)
@@ -326,7 +383,7 @@ async def select_tariff(message: Message):
         )
         reply_markup = test_payment_keyboard(order["id"])
         test_payment_text = (
-            "🧪 <b>Тестовый режим:</b> деньги не списываются.\n"
+            "\n\n🧪 <b>Тестовый режим:</b> деньги не списываются.\n"
             "Подтверждение изменит реальный профиль в 3X-UI."
         )
 
@@ -335,10 +392,159 @@ async def select_tariff(message: Message):
         "━━━━━━━━━━━━━━\n\n"
         f"📱 <b>Устройств:</b> {tariff.devices}\n"
         f"📅 <b>Срок:</b> {tariff.duration_days} дней\n"
-        f"💰 <b>Стоимость:</b> {tariff.price_text} за 30 дней\n\n"
+        f"💰 <b>Стоимость:</b> {tariff.price_text} "
+        f"или {tariff.stars_price_text} за 30 дней\n\n"
         f"{action_text}\n\n"
+        "Ниже находится защищённый счёт Telegram Stars.\n"
+        "Нажимая кнопку оплаты, вы принимаете /terms."
         f"{test_payment_text}",
         reply_markup=reply_markup
+    )
+
+    await message.answer_invoice(
+        title=f"CosmoNet — тариф {tariff.name}",
+        description=(
+            f"VPN-подписка на {tariff.duration_days} дней, "
+            f"устройств: {tariff.devices}. Оплата означает согласие "
+            "с условиями /terms."
+        ),
+        payload=stars_order["invoice_payload"],
+        currency="XTR",
+        prices=[
+            LabeledPrice(
+                label=f"Тариф {tariff.name}",
+                amount=tariff.price_stars
+            )
+        ],
+        provider_token="",
+        start_parameter=f"stars_{stars_order['id']}",
+        protect_content=True
+    )
+
+
+@router.pre_checkout_query()
+async def process_stars_pre_checkout(query: PreCheckoutQuery):
+    service = StarsPaymentService()
+    is_valid, error = service.validate_checkout(
+        telegram_id=query.from_user.id,
+        payload=query.invoice_payload,
+        currency=query.currency,
+        total_amount=query.total_amount
+    )
+
+    await query.answer(
+        ok=is_valid,
+        error_message=error
+    )
+
+
+@router.message(F.successful_payment)
+async def process_successful_stars_payment(message: Message):
+    payment = message.successful_payment
+
+    if not payment or payment.currency != "XTR":
+        return
+
+    service = StarsPaymentService()
+    result = await service.process_payment(
+        telegram_id=message.from_user.id,
+        payload=payment.invoice_payload,
+        currency=payment.currency,
+        total_amount=payment.total_amount,
+        telegram_payment_charge_id=(
+            payment.telegram_payment_charge_id
+        ),
+        provider_payment_charge_id=(
+            payment.provider_payment_charge_id
+        )
+    )
+
+    await send_stars_payment_result(message, result)
+
+
+@router.callback_query(F.data.startswith("stars_retry:"))
+async def retry_stars_provisioning(callback: CallbackQuery):
+    try:
+        order_id = int(callback.data.split(":", 1)[1])
+    except (AttributeError, ValueError):
+        await callback.answer(
+            "Некорректный номер заказа.",
+            show_alert=True
+        )
+        return
+
+    await callback.answer("Повторяю выдачу подписки…")
+
+    if callback.message:
+        await callback.message.edit_reply_markup(reply_markup=None)
+
+    service = StarsPaymentService()
+    result = await service.retry_provisioning(
+        order_id=order_id,
+        telegram_id=callback.from_user.id
+    )
+
+    if callback.message:
+        await send_stars_payment_result(callback.message, result)
+
+
+async def send_stars_payment_result(message: Message, result: dict):
+    order = result.get("order")
+
+    if not result["success"]:
+        if result["status"] == "provisioning_failed" and order:
+            await message.answer(
+                "⚠️ <b>Оплата получена, но подписка пока не выдана</b>\n\n"
+                f"📦 Заказ: <code>#{order['id']}</code>\n"
+                f"⭐ Получено: <b>{order['payment_amount']}</b>\n\n"
+                "Повторно оплачивать тариф не нужно. "
+                "Попробуйте повторить выдачу или обратитесь в поддержку.\n\n"
+                f"Техническая ошибка: "
+                f"{escape(str(result['error']))}",
+                reply_markup=stars_retry_keyboard(order["id"])
+            )
+            return
+
+        await message.answer(
+            "⚠️ <b>Платёж получен и обрабатывается</b>\n\n"
+            "Не оплачивайте тариф повторно. Если подписка не появится, "
+            "обратитесь в поддержку через /paysupport."
+        )
+        return
+
+    client = result["client"]
+    sub_id = client.get("sub_id") if client else None
+    expiry_text = (
+        format_expiry_time(client.get("expiry_time"))
+        if client
+        else "—"
+    )
+    config_url = None
+
+    if XUI_SUB_BASE_URL and sub_id:
+        config_url = (
+            f"{XUI_SUB_BASE_URL.rstrip('/')}/sub/{sub_id}"
+        )
+
+    config_text = (
+        f"\n\n🔗 <b>VPN-конфиг:</b>\n<code>{config_url}</code>"
+        if config_url
+        else "\n\n⚠️ Ссылка конфигурации пока недоступна."
+    )
+    status_text = (
+        "уже была обработана"
+        if result["status"] == "already_paid"
+        else "успешно подтверждена"
+    )
+
+    await message.answer(
+        f"✅ <b>Оплата Telegram Stars {status_text}</b>\n\n"
+        f"📦 Заказ: <code>#{order['id']}</code>\n"
+        f"⭐ Оплачено: <b>{order['payment_amount']}</b>\n"
+        f"📱 Устройств: <b>{order['devices']}</b>\n"
+        f"📅 Действует до: <b>{expiry_text}</b>"
+        f"{config_text}",
+        reply_markup=subscription_menu
     )
 
 
