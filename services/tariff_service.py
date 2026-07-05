@@ -7,6 +7,7 @@ class Tariff:
     name: str
     devices: int
     duration_days: int
+    price_rub: int
     emoji: str
 
     @property
@@ -18,7 +19,14 @@ class Tariff:
 
     @property
     def button_text(self) -> str:
-        return f"{self.emoji} {self.name} — {self.devices_text}"
+        return (
+            f"{self.emoji} {self.name} — "
+            f"{self.devices_text} — {self.price_text}"
+        )
+
+    @property
+    def price_text(self) -> str:
+        return f"{self.price_rub} ₽"
 
 
 TARIFFS = (
@@ -27,6 +35,7 @@ TARIFFS = (
         name="Lite",
         devices=1,
         duration_days=30,
+        price_rub=129,
         emoji="🚀"
     ),
     Tariff(
@@ -34,6 +43,7 @@ TARIFFS = (
         name="Standard",
         devices=3,
         duration_days=30,
+        price_rub=199,
         emoji="⚡"
     ),
     Tariff(
@@ -41,6 +51,7 @@ TARIFFS = (
         name="Family",
         devices=5,
         duration_days=30,
+        price_rub=279,
         emoji="👨‍👩‍👧‍👦"
     ),
 )

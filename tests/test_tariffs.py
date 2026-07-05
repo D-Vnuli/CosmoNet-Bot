@@ -33,13 +33,16 @@ class FakeCallback:
 
 
 class TariffTests(unittest.IsolatedAsyncioTestCase):
-    def test_tariff_catalog_contains_expected_device_limits(self):
+    def test_tariff_catalog_contains_expected_devices_and_prices(self):
         self.assertEqual(
-            [(tariff.name, tariff.devices) for tariff in TARIFFS],
             [
-                ("Lite", 1),
-                ("Standard", 3),
-                ("Family", 5)
+                (tariff.name, tariff.devices, tariff.price_rub)
+                for tariff in TARIFFS
+            ],
+            [
+                ("Lite", 1, 129),
+                ("Standard", 3, 199),
+                ("Family", 5, 279)
             ]
         )
 
@@ -48,6 +51,7 @@ class TariffTests(unittest.IsolatedAsyncioTestCase):
                 get_tariff_by_button_text(tariff.button_text),
                 tariff
             )
+            self.assertIn(tariff.price_text, tariff.button_text)
 
     def test_admin_buttons_do_not_repeat_admin_label(self):
         button_texts = [
@@ -82,7 +86,7 @@ class TariffTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Выберите тариф", text)
         self.assertIs(kwargs["reply_markup"], menu.tariff_menu)
 
-    async def test_select_tariff_shows_devices_and_pending_price(self):
+    async def test_select_tariff_shows_devices_and_monthly_price(self):
         tariff = TARIFFS[1]
         message = FakeMessage(text=tariff.button_text)
         service = Mock()
@@ -108,7 +112,7 @@ class TariffTests(unittest.IsolatedAsyncioTestCase):
         text, kwargs = message.answers[0]
         self.assertIn("Тариф Standard", text)
         self.assertIn("Устройств:</b> 3", text)
-        self.assertIn("Стоимость:</b> уточняется", text)
+        self.assertIn("Стоимость:</b> 199 ₽ за 30 дней", text)
         self.assertIn("Платёжная система пока не подключена", text)
         self.assertIs(kwargs["reply_markup"], menu.tariff_menu)
 

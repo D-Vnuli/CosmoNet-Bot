@@ -335,7 +335,7 @@ async def select_tariff(message: Message):
         "━━━━━━━━━━━━━━\n\n"
         f"📱 <b>Устройств:</b> {tariff.devices}\n"
         f"📅 <b>Срок:</b> {tariff.duration_days} дней\n"
-        "💰 <b>Стоимость:</b> уточняется\n\n"
+        f"💰 <b>Стоимость:</b> {tariff.price_text} за 30 дней\n\n"
         f"{action_text}\n\n"
         f"{test_payment_text}",
         reply_markup=reply_markup
