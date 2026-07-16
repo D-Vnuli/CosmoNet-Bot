@@ -47,7 +47,8 @@ class TariffTests(unittest.IsolatedAsyncioTestCase):
             [
                 ("Lite", 1, 129),
                 ("Standard", 3, 199),
-                ("Family", 5, 279)
+                ("Family", 5, 279),
+                ("Promo", 1, 50)
             ]
         )
 

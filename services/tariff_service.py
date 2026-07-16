@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from config import (
     STARS_PRICE_FAMILY,
+    STARS_PRICE_PROMO,
     STARS_PRICE_LITE,
     STARS_PRICE_STANDARD,
 )
@@ -41,33 +42,10 @@ class Tariff:
 
 
 TARIFFS = (
-    Tariff(
-        code="lite",
-        name="Lite",
-        devices=1,
-        duration_days=30,
-        price_rub=129,
-        price_stars=STARS_PRICE_LITE,
-        emoji="🚀"
-    ),
-    Tariff(
-        code="standard",
-        name="Standard",
-        devices=3,
-        duration_days=30,
-        price_rub=199,
-        price_stars=STARS_PRICE_STANDARD,
-        emoji="⚡"
-    ),
-    Tariff(
-        code="family",
-        name="Family",
-        devices=5,
-        duration_days=30,
-        price_rub=279,
-        price_stars=STARS_PRICE_FAMILY,
-        emoji="👨‍👩‍👧‍👦"
-    ),
+    Tariff(code="lite", name="Lite", devices=1, duration_days=30, price_rub=129, price_stars=STARS_PRICE_LITE, emoji="\U0001F680"),
+    Tariff(code="standard", name="Standard", devices=3, duration_days=30, price_rub=199, price_stars=STARS_PRICE_STANDARD, emoji="\u26A1"),
+    Tariff(code="family", name="Family", devices=5, duration_days=30, price_rub=279, price_stars=STARS_PRICE_FAMILY, emoji="\U0001F468\u200D\U0001F469\u200D\U0001F467\u200D\U0001F466"),
+    Tariff(code="promo", name="Promo", devices=1, duration_days=7, price_rub=50, price_stars=STARS_PRICE_PROMO, emoji="\U0001F381"),
 )
 
 

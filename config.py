@@ -77,6 +77,7 @@ TEST_PAYMENTS_ENABLED = os.getenv(
     "false"
 ).strip().lower() in {"1", "true", "yes", "on"}
 
+STARS_PRICE_PROMO = get_positive_int("STARS_PRICE_PROMO", 30)
 STARS_PRICE_LITE = get_positive_int("STARS_PRICE_LITE", 79)
 STARS_PRICE_STANDARD = get_positive_int("STARS_PRICE_STANDARD", 119)
 STARS_PRICE_FAMILY = get_positive_int("STARS_PRICE_FAMILY", 169)
