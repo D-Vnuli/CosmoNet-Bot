@@ -20,3 +20,6 @@ database/*.sqlite3
 database/*-journal
 database/*.db-wal
 database/*.db-shm
+
+# Local generated VPN test artifacts
+artifacts/

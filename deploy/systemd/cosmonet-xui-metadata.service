@@ -1,0 +1,16 @@
+[Unit]
+Description=CosmoNet 3X-UI subscription metadata API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/cosmonet-xui-metadata
+EnvironmentFile=/etc/cosmonet-xui-metadata.env
+ExecStart=/opt/cosmonet-xui-metadata/venv/bin/python /opt/cosmonet-xui-metadata/xui_metadata_api.py
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target
