@@ -29,7 +29,7 @@ class Tariff:
     def button_text(self) -> str:
         return (
             f"{self.emoji} {self.name} — "
-            f"{self.devices_text} — {self.price_text}"
+            f"{self.devices_text} — {self.duration_days} \u0434\u043d. — {self.price_text}"
         )
 
     @property
@@ -42,10 +42,10 @@ class Tariff:
 
 
 TARIFFS = (
+    Tariff(code="promo", name="Demo", devices=1, duration_days=7, price_rub=50, price_stars=STARS_PRICE_PROMO, emoji="\U0001F381"),
     Tariff(code="lite", name="Lite", devices=1, duration_days=30, price_rub=129, price_stars=STARS_PRICE_LITE, emoji="\U0001F680"),
     Tariff(code="standard", name="Standard", devices=3, duration_days=30, price_rub=199, price_stars=STARS_PRICE_STANDARD, emoji="\u26A1"),
     Tariff(code="family", name="Family", devices=5, duration_days=30, price_rub=279, price_stars=STARS_PRICE_FAMILY, emoji="\U0001F468\u200D\U0001F469\u200D\U0001F467\u200D\U0001F466"),
-    Tariff(code="promo", name="Promo", devices=1, duration_days=7, price_rub=50, price_stars=STARS_PRICE_PROMO, emoji="\U0001F381"),
 )
 
 

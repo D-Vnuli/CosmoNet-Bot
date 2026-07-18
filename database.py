@@ -552,3 +552,84 @@ def fail_order(order_id: int, error: str):
             WHERE id = ?
         """, (error, now, order_id))
         conn.commit()
+
+def create_robokassa_order(
+    *,
+    telegram_id: int,
+    tariff_code: str,
+    devices: int,
+    duration_days: int,
+    action: str,
+    target_expiry_ms: int,
+    payment_amount: int,
+) -> int:
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO orders (
+                telegram_id,
+                tariff_code,
+                devices,
+                duration_days,
+                action,
+                provider,
+                status,
+                target_expiry_ms,
+                payment_amount,
+                currency,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, 'robokassa', 'pending',
+                    ?, ?, 'RUB', ?, ?)
+        """, (
+            telegram_id,
+            tariff_code,
+            devices,
+            duration_days,
+            action,
+            target_expiry_ms,
+            payment_amount,
+            now,
+            now,
+        ))
+        conn.commit()
+        return cursor.lastrowid
+
+
+def claim_robokassa_payment(order_id: int):
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    with get_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        cursor.execute("SELECT * FROM orders WHERE id = ?", (order_id,))
+        row = cursor.fetchone()
+        if not row:
+            return "not_found", None
+
+        order = dict(row)
+        if order["provider"] != "robokassa":
+            return "invalid", order
+        if order["status"] == "paid":
+            return "already_paid", order
+        if order["status"] == "processing":
+            return "processing", order
+        if order["status"] not in {"pending", "failed"}:
+            return "invalid", order
+
+        cursor.execute("""
+            UPDATE orders
+            SET status = 'processing',
+                provider_payment_charge_id = ?,
+                paid_at = COALESCE(paid_at, ?),
+                error = NULL,
+                updated_at = ?
+            WHERE id = ?
+        """, (f"robokassa:{order_id}", now, now, order_id))
+        conn.commit()
+
+    return "claimed", get_order(order_id)

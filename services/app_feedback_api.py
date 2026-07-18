@@ -13,6 +13,7 @@ from aiogram import Bot
 
 from config import ADMIN_IDS, BOT_USERNAME, XUI_SUB_BASE_URL
 from services.app_auth_service import AppAuthService
+from services.robokassa_payment_service import RobokassaPaymentService
 from services.xui_service import XUIService
 
 
@@ -103,6 +104,23 @@ def create_app(
             return web.json_response({"message": "Сервис временно недоступен."}, status=503)
         return web.json_response({"delivered": True})
 
+    async def robokassa_result(request: web.Request) -> web.Response:
+        try:
+            data = {
+                str(key): str(value)
+                for key, value in (await request.post()).items()
+            }
+        except web.HTTPException:
+            return web.Response(status=400, text="Invalid request")
+
+        result = await RobokassaPaymentService().process_result(data)
+        order = result.get("order")
+        if not order:
+            return web.Response(status=400, text="Invalid payment")
+
+        if result["status"] in {"paid", "provisioning_failed"}:
+            await _notify_robokassa_result(bot, result)
+        return web.Response(text=f"OK{order['id']}")
     async def start_auth(request: web.Request) -> web.Response:
         if not telegram_username:
             return web.json_response({"message": "Telegram bot username is not configured."}, status=503)
@@ -159,6 +177,7 @@ def create_app(
             return web.json_response({"message": "Unauthorized."}, status=401)
         return web.json_response({"loggedOut": True})
 
+    app.router.add_post("/payments/robokassa/result", robokassa_result)
     app.router.add_post("/api/app/feedback", submit_feedback)
     app.router.add_post("/api/app/auth/start", start_auth)
     app.router.add_get("/api/app/auth/status", auth_status)
@@ -250,3 +269,24 @@ def _configured_admin_ids() -> list[int]:
         for value in raw.split(",")
         if value.strip().isdigit()
     ] or ADMIN_IDS
+
+async def _notify_robokassa_result(bot: Bot, result: dict) -> None:
+    order = result["order"]
+    if result["status"] == "paid":
+        text = (
+            "✅ <b>Оплата картой подтверждена</b>\n\n"
+            f"Заказ: <code>#{order['id']}</code>\n"
+            "Подписка выдана. Откройте раздел «Подписка» в боте, "
+            "чтобы получить конфигурацию."
+        )
+    else:
+        text = (
+            "⚠️ <b>Оплата картой получена</b>\n\n"
+            f"Заказ: <code>#{order['id']}</code>\n"
+            "Выдача подписки временно не завершилась. Не оплачивайте "
+            "заказ повторно — напишите в поддержку через /paysupport."
+        )
+    try:
+        await bot.send_message(chat_id=order["telegram_id"], text=text)
+    except Exception:
+        pass

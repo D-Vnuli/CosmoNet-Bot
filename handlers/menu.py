@@ -22,14 +22,12 @@ from services.tariff_service import (
     get_tariff_by_code,
 )
 from services.stars_payment_service import StarsPaymentService
-from services.test_payment_service import TestPaymentService
 from database import add_user_if_not_exists, is_registered_user
 from keyboards.main_menu import main_menu
 from services.xui_service import XUIService, format_bytes, format_expiry_time
 from config import (
     ADMIN_IDS,
     PAY_SUPPORT_CONTACT,
-    TEST_PAYMENTS_ENABLED,
     XUI_SUB_BASE_URL,
 )
 
@@ -86,22 +84,8 @@ feedback_cancel_menu = ReplyKeyboardMarkup(
 )
 
 
-def test_payment_keyboard(order_id: int):
-    return InlineKeyboardMarkup(
-        inline_keyboard=[[
-            InlineKeyboardButton(
-                text="🧪 Подтвердить тестовую оплату",
-                callback_data=f"test_pay:{order_id}"
-            )
-        ]]
-    )
-
-
-def payment_method_keyboard(
-    tariff_code: str,
-    test_order_id: int | None = None
-):
-    keyboard = [[
+def payment_method_keyboard(tariff_code: str):
+    return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(
             text="⭐ Telegram Stars",
             callback_data=f"pay_stars:{tariff_code}"
@@ -110,18 +94,7 @@ def payment_method_keyboard(
             text="💳 Карта",
             callback_data=f"pay_card:{tariff_code}"
         )
-    ]]
-
-    if test_order_id is not None:
-        keyboard.append([
-            InlineKeyboardButton(
-                text="🧪 Тестовая оплата",
-                callback_data=f"test_pay:{test_order_id}"
-            )
-        ])
-
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
+    ]])
 
 def stars_retry_keyboard(order_id: int):
     return InlineKeyboardMarkup(
@@ -131,13 +104,6 @@ def stars_retry_keyboard(order_id: int):
                 callback_data=f"stars_retry:{order_id}"
             )
         ]]
-    )
-
-
-def can_use_test_payments(telegram_id: int) -> bool:
-    return (
-        telegram_id in ADMIN_IDS
-        or TEST_PAYMENTS_ENABLED
     )
 
 
@@ -515,40 +481,15 @@ async def select_tariff(message: Message):
             "с выбранным лимитом устройств."
         )
 
-    test_order_id = None
-    test_payment_text = ""
-
-    if (
-        can_use_test_payments(message.from_user.id)
-        and (
-            message.from_user.id in ADMIN_IDS
-            or is_registered_user(message.from_user.id)
-        )
-    ):
-        payment_service = TestPaymentService(service)
-        order = payment_service.create_order(
-            telegram_id=message.from_user.id,
-            tariff=tariff,
-            purchase_result=result
-        )
-        test_order_id = order["id"]
-        test_payment_text = (
-            "\n\nАдминистратору также доступна тестовая оплата."
-        )
-
     await message.answer(
         f"{tariff.emoji} <b>Тариф {tariff.name}</b>\n\n"
         "━━━━━━━━━━━━━━\n\n"
         f"📱 <b>Устройств:</b> {tariff.devices}\n"
         f"📅 <b>Срок:</b> {tariff.duration_days} дней\n"
-        f"💰 <b>Стоимость:</b> {tariff.price_text} за 30 дней\n\n"
+        f"💰 <b>Стоимость:</b> {tariff.price_text} за {tariff.duration_days} дней\n\n"
         f"{action_text}\n\n"
-        "Выберите способ оплаты:"
-        f"{test_payment_text}",
-        reply_markup=payment_method_keyboard(
-            tariff.code,
-            test_order_id
-        )
+        "Выберите способ оплаты:",
+        reply_markup=payment_method_keyboard(tariff.code)
     )
 
 
@@ -790,97 +731,6 @@ async def send_stars_payment_result(message: Message, result: dict):
     )
 
 
-@router.callback_query(F.data.startswith("test_pay:"))
-async def confirm_test_payment(callback: CallbackQuery):
-    if not can_use_test_payments(callback.from_user.id):
-        await callback.answer(
-            "Тестовый режим оплаты отключён.",
-            show_alert=True
-        )
-        return
-
-    if (
-        callback.from_user.id not in ADMIN_IDS
-        and not is_registered_user(callback.from_user.id)
-    ):
-        await callback.answer(
-            "Сначала запустите бота командой /start.",
-            show_alert=True
-        )
-        return
-
-    try:
-        order_id = int(callback.data.split(":", 1)[1])
-    except (AttributeError, ValueError):
-        await callback.answer("Некорректный тестовый заказ.", show_alert=True)
-        return
-
-    payment_service = TestPaymentService()
-    order = payment_service.get_order(order_id)
-
-    if not order or order["telegram_id"] != callback.from_user.id:
-        await callback.answer("Тестовый заказ не найден.", show_alert=True)
-        return
-
-    await callback.answer("Обрабатываю тестовую оплату…")
-
-    if callback.message:
-        await callback.message.edit_reply_markup(reply_markup=None)
-
-    result = await payment_service.confirm_order(order_id)
-
-    if not callback.message:
-        return
-
-    if not result["success"]:
-        retry_markup = (
-            test_payment_keyboard(order_id)
-            if result["status"] == "failed"
-            else None
-        )
-        await callback.message.answer(
-            "❌ <b>Тестовая оплата не завершена</b>\n\n"
-            f"Ошибка: {escape(str(result['error']))}",
-            reply_markup=retry_markup
-        )
-        return
-
-    client = result["client"]
-    sub_id = client.get("sub_id") if client else None
-    expiry_text = (
-        format_expiry_time(client.get("expiry_time"))
-        if client
-        else "—"
-    )
-    config_url = None
-
-    if XUI_SUB_BASE_URL and sub_id:
-        config_url = (
-            f"{XUI_SUB_BASE_URL.rstrip('/')}/sub/{sub_id}"
-        )
-
-    config_text = (
-        f"\n\n🔗 <b>VPN-конфиг:</b>\n<code>{config_url}</code>"
-        if config_url
-        else "\n\n⚠️ Ссылка конфигурации пока недоступна."
-    )
-    status_text = (
-        "уже была обработана"
-        if result["status"] == "already_paid"
-        else "успешно подтверждена"
-    )
-
-    await callback.message.answer(
-        "✅ <b>Тестовая оплата "
-        f"{status_text}</b>\n\n"
-        f"📦 Заказ: <code>#{order_id}</code>\n"
-        f"📱 Устройств: <b>{result['order']['devices']}</b>\n"
-        f"📅 Действует до: <b>{expiry_text}</b>"
-        f"{config_text}",
-        reply_markup=subscription_menu
-    )
-
-
 @router.message(F.text == "⬅️ Назад к подписке")
 async def back_to_subscription(message: Message):
     await subscription(message)
@@ -945,10 +795,11 @@ async def apps(message: Message):
         "id6450534064\">Streisand</a> — рекомендуем\n"
         "• <a href=\"https://apps.apple.com/us/app/hiddify-proxy-vpn/"
         "id6596777532\">Hiddify</a> — альтернатива\n\n"
-        "🪟 <b>Windows:</b>\n"
-        "• <a href=\"https://github.com/hiddify/hiddify-app/releases/"
-        "latest\">Hiddify</a>\n\n"
-        "💻 <b>macOS:</b>\n"
+        "\U0001F5A5 <b>CosmoNet \u0434\u043B\u044F Windows</b>\n"
+        "\u041D\u0430\u0448 \u043D\u0430\u0442\u0438\u0432\u043D\u044B\u0439 \u043A\u043B\u0438\u0435\u043D\u0442 \u0434\u043B\u044F Windows 10 \u0438 11 \u0441\u0435\u0439\u0447\u0430\u0441 \u0432 \u0440\u0430\u0437\u0440\u0430\u0431\u043E\u0442\u043A\u0435. "
+        "\u041E\u043D \u0431\u0443\u0434\u0435\u0442 \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0430\u0442\u044C \u0432\u0430\u0448 \u043F\u0440\u043E\u0444\u0438\u043B\u044C \u0432 \u043E\u0434\u0438\u043D \u043A\u043B\u0438\u043A \u0438 \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u0441\u0442\u0430\u0442\u0443\u0441 \u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0438.\n\n"
+        "\u041F\u043E\u043A\u0430 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u0439\u0442\u0435:\n"
+        "\u2022 <a href=\"https://github.com/hiddify/hiddify-app/releases/latest\">Hiddify</a> \u2014 \u0438\u043C\u043F\u043E\u0440\u0442\u0438\u0440\u0443\u0439\u0442\u0435 \u043A\u043E\u043D\u0444\u0438\u0433 \u0438\u0437 \u0431\u043E\u0442\u0430. \u0421\u0441\u044B\u043B\u043A\u0430 \u043D\u0430 CosmoNet \u0434\u043B\u044F Windows \u043F\u043E\u044F\u0432\u0438\u0442\u0441\u044F \u0437\u0434\u0435\u0441\u044C \u043F\u043E\u0441\u043B\u0435 \u0440\u0435\u043B\u0438\u0437\u0430.\n\n"        "💻 <b>macOS:</b>\n"
         "• <a href=\"https://github.com/hiddify/hiddify-app/releases/"
         "latest\">Hiddify</a>\n\n"
         "━━━━━━━━━━━━━━\n\n"

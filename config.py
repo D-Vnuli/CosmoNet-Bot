@@ -72,11 +72,17 @@ XUI_PROVISIONING_INBOUND_IDS = get_int_list(
     "XUI_PROVISIONING_INBOUND_IDS"
 )
 
-TEST_PAYMENTS_ENABLED = os.getenv(
-    "TEST_PAYMENTS_ENABLED",
-    "false"
+ROBOKASSA_MERCHANT_LOGIN = os.getenv(
+    "ROBOKASSA_MERCHANT_LOGIN", ""
+).strip()
+ROBOKASSA_PASSWORD_1 = os.getenv("ROBOKASSA_PASSWORD_1", "")
+ROBOKASSA_PASSWORD_2 = os.getenv("ROBOKASSA_PASSWORD_2", "")
+ROBOKASSA_HASH_ALGORITHM = os.getenv(
+    "ROBOKASSA_HASH_ALGORITHM", "md5"
+).strip().lower()
+ROBOKASSA_IS_TEST = os.getenv(
+    "ROBOKASSA_IS_TEST", "false"
 ).strip().lower() in {"1", "true", "yes", "on"}
-
 STARS_PRICE_PROMO = get_positive_int("STARS_PRICE_PROMO", 30)
 STARS_PRICE_LITE = get_positive_int("STARS_PRICE_LITE", 79)
 STARS_PRICE_STANDARD = get_positive_int("STARS_PRICE_STANDARD", 119)
