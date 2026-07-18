@@ -211,7 +211,7 @@ class StarsPaymentHandlerTests(unittest.IsolatedAsyncioTestCase):
             "cosmonet-stars:15"
         )
 
-    async def test_card_method_reports_that_it_is_unavailable(self):
+    async def test_card_method_creates_robokassa_link(self):
         callback = Mock()
         callback.data = "pay_card:lite"
         callback.from_user = SimpleNamespace(id=1001)
@@ -220,18 +220,32 @@ class StarsPaymentHandlerTests(unittest.IsolatedAsyncioTestCase):
         callback.message.edit_reply_markup = AsyncMock()
         callback.message.answer = AsyncMock()
 
-        await menu.select_card_payment(callback)
-
-        text = callback.message.answer.await_args.args[0]
-        markup = callback.message.answer.await_args.kwargs[
-            "reply_markup"
-        ]
-        self.assertIn("временно недоступна", text)
-        self.assertEqual(
-            markup.inline_keyboard[0][0].callback_data,
-            "pay_stars:lite"
+        subscription_service = Mock()
+        subscription_service.get_purchase_action = AsyncMock(
+            return_value={"success": True, "action": "create", "client": None}
+        )
+        payment_service = Mock()
+        payment_service.is_configured = True
+        payment_service.create_order = Mock(return_value={"id": 15})
+        payment_service.payment_url = Mock(
+            return_value="https://auth.robokassa.ru/Merchant/Index.aspx?InvId=15"
         )
 
+        with (
+            patch.object(menu, "is_registered_user", return_value=True),
+            patch.object(menu, "SubscriptionService", return_value=subscription_service),
+            patch.object(menu, "RobokassaPaymentService", return_value=payment_service),
+        ):
+            await menu.select_card_payment(callback)
+
+        payment_service.create_order.assert_called_once()
+        text = callback.message.answer.await_args.args[0]
+        markup = callback.message.answer.await_args.kwargs["reply_markup"]
+        self.assertIn("Robokassa", text)
+        self.assertEqual(
+            markup.inline_keyboard[0][0].url,
+            "https://auth.robokassa.ru/Merchant/Index.aspx?InvId=15",
+        )
     async def test_pre_checkout_query_is_answered(self):
         query = Mock()
         query.from_user = SimpleNamespace(id=1001)

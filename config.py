@@ -1,3 +1,4 @@
+import json
 import os
 from dotenv import load_dotenv
 
@@ -46,6 +47,32 @@ def get_int_list(name: str) -> list[int]:
     return values
 
 
+def get_device_limit_overrides(name: str) -> dict[int, dict[str, int]]:
+    raw_value = os.getenv(name, "{}").strip()
+
+    try:
+        source = json.loads(raw_value)
+    except json.JSONDecodeError as error:
+        raise RuntimeError(f"{name} must be valid JSON") from error
+
+    if not isinstance(source, dict):
+        raise RuntimeError(f"{name} must contain an object")
+
+    overrides: dict[int, dict[str, int]] = {}
+    for raw_telegram_id, raw_tariffs in source.items():
+        if not str(raw_telegram_id).isdigit() or not isinstance(raw_tariffs, dict):
+            raise RuntimeError(f"{name} contains an invalid user rule")
+
+        tariff_limits: dict[str, int] = {}
+        for tariff_code, devices in raw_tariffs.items():
+            if not isinstance(tariff_code, str) or not isinstance(devices, int) or devices <= 0:
+                raise RuntimeError(f"{name} contains an invalid device limit")
+            tariff_limits[tariff_code] = devices
+
+        overrides[int(raw_telegram_id)] = tariff_limits
+
+    return overrides
+
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "").strip().lstrip("@")
 ADMIN_IDS_RAW = os.getenv("ADMIN_IDS", "")
@@ -83,6 +110,7 @@ ROBOKASSA_HASH_ALGORITHM = os.getenv(
 ROBOKASSA_IS_TEST = os.getenv(
     "ROBOKASSA_IS_TEST", "false"
 ).strip().lower() in {"1", "true", "yes", "on"}
+DEVICE_LIMIT_OVERRIDES = get_device_limit_overrides("DEVICE_LIMIT_OVERRIDES")
 STARS_PRICE_PROMO = get_positive_int("STARS_PRICE_PROMO", 30)
 STARS_PRICE_LITE = get_positive_int("STARS_PRICE_LITE", 79)
 STARS_PRICE_STANDARD = get_positive_int("STARS_PRICE_STANDARD", 119)

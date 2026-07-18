@@ -20,8 +20,10 @@ from services.tariff_service import (
     TARIFFS,
     get_tariff_by_button_text,
     get_tariff_by_code,
+    get_tariff_for_user,
 )
 from services.stars_payment_service import StarsPaymentService
+from services.robokassa_payment_service import RobokassaPaymentService
 from database import add_user_if_not_exists, is_registered_user
 from keyboards.main_menu import main_menu
 from services.xui_service import XUIService, format_bytes, format_expiry_time
@@ -454,6 +456,8 @@ async def select_tariff(message: Message):
     if not tariff:
         return
 
+    tariff = get_tariff_for_user(message.from_user.id, tariff)
+
     if not is_registered_user(message.from_user.id):
         await message.answer(
             "Сначала зарегистрируйтесь в боте командой /start."
@@ -504,6 +508,8 @@ async def select_stars_payment(callback: CallbackQuery):
             show_alert=True
         )
         return
+
+    tariff = get_tariff_for_user(callback.from_user.id, tariff)
 
     if not is_registered_user(callback.from_user.id):
         await callback.answer(
@@ -579,29 +585,61 @@ async def select_card_payment(callback: CallbackQuery):
         )
         return
 
-    await callback.answer()
+    tariff = get_tariff_for_user(callback.from_user.id, tariff)
 
+    if not is_registered_user(callback.from_user.id):
+        await callback.answer(
+            "Сначала запустите бота командой /start.",
+            show_alert=True,
+        )
+        return
+
+    subscription_service = SubscriptionService()
+    purchase_result = await subscription_service.get_purchase_action(
+        callback.from_user.id
+    )
+    if not purchase_result["success"]:
+        await callback.answer(
+            "Не удалось проверить VPN-профиль.",
+            show_alert=True,
+        )
+        return
+
+    payment_service = RobokassaPaymentService(subscription_service)
+    if not payment_service.is_configured:
+        await callback.answer(
+            "Оплата картой временно недоступна.",
+            show_alert=True,
+        )
+        return
+
+    order = payment_service.create_order(
+        telegram_id=callback.from_user.id,
+        tariff=tariff,
+        purchase_result=purchase_result,
+    )
+    payment_url = payment_service.payment_url(order)
+
+    await callback.answer()
     if not callback.message:
         return
 
     await callback.message.edit_reply_markup(reply_markup=None)
     await callback.message.answer(
-        "💳 <b>Оплата картой</b>\n\n"
+        "💳 <b>Оплата через Robokassa</b>\n\n"
         f"{tariff.emoji} Тариф: <b>{tariff.name}</b>\n"
-        f"📱 Устройств: <b>{tariff.devices}</b>\n"
+        f"📱 Устройства: <b>{tariff.devices}</b>\n"
         f"📅 Срок: <b>{tariff.duration_days} дней</b>\n"
         f"💳 К оплате: <b>{tariff.price_text}</b>\n\n"
-        "Оплата банковской картой пока подключается и временно "
-        "недоступна. Сейчас можно оплатить подписку через "
-        "Telegram Stars.",
+        "После успешной оплаты бот автоматически выдаст или продлит доступ.",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[[
                 InlineKeyboardButton(
-                    text="⭐ Оплатить Telegram Stars",
-                    callback_data=f"pay_stars:{tariff.code}"
+                    text="💳 Перейти к оплате",
+                    url=payment_url,
                 )
             ]]
-        )
+        ),
     )
 
 

@@ -1,6 +1,7 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from config import (
+    DEVICE_LIMIT_OVERRIDES,
     STARS_PRICE_FAMILY,
     STARS_PRICE_PROMO,
     STARS_PRICE_LITE,
@@ -63,3 +64,11 @@ def get_tariff_by_code(code: str | None) -> Tariff | None:
             return tariff
 
     return None
+
+
+def get_tariff_for_user(telegram_id: int, tariff: Tariff) -> Tariff:
+    devices = DEVICE_LIMIT_OVERRIDES.get(telegram_id, {}).get(tariff.code)
+    if devices is None or devices == tariff.devices:
+        return tariff
+
+    return replace(tariff, devices=devices)
