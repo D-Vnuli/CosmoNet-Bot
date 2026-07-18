@@ -49,6 +49,8 @@ class FeedbackTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("🛒 Тарифы", subscription_buttons)
         self.assertIn("🛰 Конфигурация", subscription_buttons)
+        self.assertIn("🔐 Как подключиться", info_buttons)
+        self.assertIn("📱 Приложения", info_buttons)
         self.assertIn("💬 Поддержка", info_buttons)
     async def test_feedback_start_waits_for_message(self):
         message = FakeMessage()
@@ -79,27 +81,14 @@ class FeedbackTests(unittest.IsolatedAsyncioTestCase):
         confirmation = message.answer.await_args.args[0]
         self.assertIn("отправлено администратору", confirmation)
 
-    async def test_apps_message_contains_clickable_official_links(self):
+    async def test_apps_message_contains_only_cosmonet_windows_client(self):
         message = FakeMessage()
 
         await menu.apps(message)
 
         text = message.answer.await_args.args[0]
-        self.assertIn(
-            '<a href="https://play.google.com/store/apps/details?'
-            'id=com.v2raytun.android">v2RayTun</a>',
-            text
-        )
-        self.assertIn(
-            '<a href="https://apps.apple.com/us/app/streisand/'
-            'id6450534064">Streisand</a>',
-            text
-        )
-        self.assertIn(
-            "https://github.com/hiddify/hiddify-app/releases/latest",
-            text
-        )
-
+        self.assertIn("CosmoNet для Windows", text)
+        self.assertNotIn("Hiddify", text)
 
 if __name__ == "__main__":
     unittest.main()

@@ -9,7 +9,7 @@ main_menu = ReplyKeyboardMarkup(
         ],
         [
             KeyboardButton(text="🛰 Конфигурация"),
-            KeyboardButton(text="💬 Поддержка"),
+            KeyboardButton(text="🆘 Помощь"),
         ],
     ],
     resize_keyboard=True,

@@ -773,33 +773,26 @@ async def back_to_subscription(message: Message):
     await subscription(message)
 
 
-@router.message(F.text == "ℹ️ INFO")
+@router.message(F.text.in_({"ℹ️ INFO", "🆘 Помощь"}))
 async def info(message: Message):
     await message.answer(
-        "ℹ️ <b>Помощь по CosmoNet</b>\n\n"
-        "━━━━━━━━━━━━━━\n\n"
-        "Здесь можно быстро узнать, как купить подписку, установить "
-        "приложение и подключить VPN.\n\n"
-        "Если что-то не получилось — напишите через кнопку "
-        "«💬 Обратная связь».",
+        "🆘 <b>Помощь CosmoNet</b>\n\n"
+        "Выберите нужный раздел:\n"
+        "🔐 Как подключиться — от тарифа до первого соединения.\n"
+        "📱 Приложения — CosmoNet для Windows.\n"
+        "💬 Поддержка — вопрос по оплате или доступу.",
         reply_markup=info_menu
     )
 
-
-@router.message(F.text == "🔑 Как получить подписку")
+@router.message(F.text.in_({"🔑 Как получить подписку", "🔐 Как подключиться"}))
 async def how_to_get_subscription(message: Message):
     await message.answer(
-        "🔑 <b>Как получить подписку</b>\n\n"
-        "━━━━━━━━━━━━━━\n\n"
-        "1. Откройте «💳 Подписка».\n"
-        "2. Нажмите «🛒 Купить / продлить».\n"
-        "3. Выберите тариф и способ оплаты.\n"
-        "4. Оплатите счёт.\n"
-        "5. Бот сразу создаст или продлит подписку.\n\n"
-        "Оплата через Telegram Stars уже работает. "
-        "Оплата картой появится позже."
+        "🔐 <b>Как подключиться</b>\n\n"
+        "1. В разделе «🚀 Подключиться» выберите тариф и оплатите его.\n"
+        "2. Откройте «🛰 Конфигурация» — там появится ваш личный доступ.\n"
+        "3. Установите CosmoNet для Windows и подключитесь к профилю.\n\n"
+        "Статус подписки и срок действия всегда доступны в «🪐 Мой CosmoNet»."
     )
-
 
 @router.message(F.text == "⚙️ Как подключить конфиг")
 async def how_to_connect_config(message: Message):
@@ -817,34 +810,15 @@ async def how_to_connect_config(message: Message):
     )
 
 
-@router.message(F.text == "📱 Какие приложения использовать")
+@router.message(F.text.in_({"📱 Какие приложения использовать", "📱 Приложения"}))
 async def apps(message: Message):
     await message.answer(
-        "📱 <b>Приложения для подключения</b>\n\n"
-        "━━━━━━━━━━━━━━\n\n"
-        "🤖 <b>Android:</b>\n"
-        "• <a href=\"https://play.google.com/store/apps/details?"
-        "id=com.v2raytun.android\">v2RayTun</a> — простой вариант\n"
-        "• <a href=\"https://play.google.com/store/apps/details?"
-        "id=app.hiddify.com\">Hiddify</a> — удобная альтернатива\n\n"
-        "🍏 <b>iPhone и iPad:</b>\n"
-        "• <a href=\"https://apps.apple.com/us/app/streisand/"
-        "id6450534064\">Streisand</a> — рекомендуем\n"
-        "• <a href=\"https://apps.apple.com/us/app/hiddify-proxy-vpn/"
-        "id6596777532\">Hiddify</a> — альтернатива\n\n"
-        "\U0001F5A5 <b>CosmoNet \u0434\u043B\u044F Windows</b>\n"
-        "\u041D\u0430\u0448 \u043D\u0430\u0442\u0438\u0432\u043D\u044B\u0439 \u043A\u043B\u0438\u0435\u043D\u0442 \u0434\u043B\u044F Windows 10 \u0438 11 \u0441\u0435\u0439\u0447\u0430\u0441 \u0432 \u0440\u0430\u0437\u0440\u0430\u0431\u043E\u0442\u043A\u0435. "
-        "\u041E\u043D \u0431\u0443\u0434\u0435\u0442 \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0430\u0442\u044C \u0432\u0430\u0448 \u043F\u0440\u043E\u0444\u0438\u043B\u044C \u0432 \u043E\u0434\u0438\u043D \u043A\u043B\u0438\u043A \u0438 \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u0441\u0442\u0430\u0442\u0443\u0441 \u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0438.\n\n"
-        "\u041F\u043E\u043A\u0430 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u0439\u0442\u0435:\n"
-        "\u2022 <a href=\"https://github.com/hiddify/hiddify-app/releases/latest\">Hiddify</a> \u2014 \u0438\u043C\u043F\u043E\u0440\u0442\u0438\u0440\u0443\u0439\u0442\u0435 \u043A\u043E\u043D\u0444\u0438\u0433 \u0438\u0437 \u0431\u043E\u0442\u0430. \u0421\u0441\u044B\u043B\u043A\u0430 \u043D\u0430 CosmoNet \u0434\u043B\u044F Windows \u043F\u043E\u044F\u0432\u0438\u0442\u0441\u044F \u0437\u0434\u0435\u0441\u044C \u043F\u043E\u0441\u043B\u0435 \u0440\u0435\u043B\u0438\u0437\u0430.\n\n"        "💻 <b>macOS:</b>\n"
-        "• <a href=\"https://github.com/hiddify/hiddify-app/releases/"
-        "latest\">Hiddify</a>\n\n"
-        "━━━━━━━━━━━━━━\n\n"
-        "После установки скопируйте конфиг из бота и добавьте его "
-        "в приложение через импорт из буфера обмена.",
-        disable_web_page_preview=True
+        "📱 <b>CosmoNet для Windows</b>\n\n"
+        "Для подключения используйте только клиент CosmoNet для Windows 10/11. "
+        "Сторонние приложения и импорт конфигураций не требуются.\n\n"
+        "В клиенте вы входите в свой профиль, видите статус подписки и управляете подключением в одном окне.\n\n"
+        "Личный доступ находится в разделе «🛰 Конфигурация» этого бота."
     )
-
 
 @router.message(F.text == "← В главное меню")
 @router.message(F.text == "⬅️ Главное меню")
