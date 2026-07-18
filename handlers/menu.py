@@ -47,7 +47,7 @@ class FeedbackStates(StatesGroup):
 
 subscription_menu = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="📡 Статус"), KeyboardButton(text="🛒 Тарифы")],
+        [KeyboardButton(text="📡 Статус")],
         [KeyboardButton(text="🛰 Конфигурация")],
         [KeyboardButton(text="← В главное меню")],
     ],
@@ -69,7 +69,7 @@ tariff_menu = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text=tariff.button_text)]
         for tariff in TARIFFS
-    ] + [[KeyboardButton(text="← К подписке")]],
+    ] + [[KeyboardButton(text="← В главное меню")]],
     resize_keyboard=True,
     input_field_placeholder="Выберите тариф",
 )
