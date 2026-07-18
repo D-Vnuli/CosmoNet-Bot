@@ -788,10 +788,14 @@ async def info(message: Message):
 async def how_to_get_subscription(message: Message):
     await message.answer(
         "🔐 <b>Как подключиться</b>\n\n"
-        "1. В разделе «🚀 Подключиться» выберите тариф и оплатите его.\n"
-        "2. Откройте «🛰 Конфигурация» — там появится ваш личный доступ.\n"
-        "3. Установите CosmoNet для Windows и подключитесь к профилю.\n\n"
-        "Статус подписки и срок действия всегда доступны в «🪐 Мой CosmoNet»."
+        "<b>Android и iPhone</b>\n"
+        "1. Выберите приложение в разделе «📱 Приложения».\n"
+        "2. В боте откройте «🛰 Конфигурация» и скопируйте личную ссылку.\n"
+        "3. В приложении выберите импорт ссылки/подписки из буфера и включите VPN.\n\n"
+        "<b>Windows</b>\n"
+        "1. Установите CosmoNet для Windows.\n"
+        "2. Нажмите «Войти через Telegram» и подтвердите вход в боте.\n"
+        "3. Подписка и профиль подтянутся автоматически — ссылку конфигурации вставлять не нужно."
     )
 
 @router.message(F.text == "⚙️ Как подключить конфиг")
@@ -813,10 +817,21 @@ async def how_to_connect_config(message: Message):
 @router.message(F.text.in_({"📱 Какие приложения использовать", "📱 Приложения"}))
 async def apps(message: Message):
     await message.answer(
-        "📱 <b>CosmoNet для Windows</b>\n\n"
-        "CosmoNet для Windows — единый клиент для подключения к сервису на Windows 10/11. "
-        "Используйте только его: сторонние приложения не поддерживаются.\n\n"
-        "Личный доступ находится в разделе «🛰 Конфигурация», а срок действия — в «🪐 Мой CosmoNet»."
+        "📱 <b>Приложения для подключения</b>\n\n"
+        "<b>Android</b>\n"
+        "• v2RayTun\n"
+        "• Hiddify\n"
+        "• v2rayNG\n"
+        "• NekoBox\n\n"
+        "<b>iPhone и iPad</b>\n"
+        "• Happ\n"
+        "• Streisand\n"
+        "• Hiddify\n"
+        "• Shadowrocket\n\n"
+        "<b>Windows</b>\n"
+        "• CosmoNet для Windows\n\n"
+        "Мобильные приложения устанавливайте из Google Play или App Store. "
+        "Доступность некоторых приложений на iPhone зависит от региона Apple Account."
     )
 
 @router.message(F.text == "← В главное меню")

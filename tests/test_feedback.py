@@ -81,14 +81,15 @@ class FeedbackTests(unittest.IsolatedAsyncioTestCase):
         confirmation = message.answer.await_args.args[0]
         self.assertIn("отправлено администратору", confirmation)
 
-    async def test_apps_message_contains_only_cosmonet_windows_client(self):
+    async def test_apps_message_lists_mobile_clients_and_cosmonet_for_windows(self):
         message = FakeMessage()
 
         await menu.apps(message)
 
         text = message.answer.await_args.args[0]
+        self.assertIn("v2RayTun", text)
+        self.assertIn("Happ", text)
         self.assertIn("CosmoNet для Windows", text)
-        self.assertNotIn("Hiddify", text)
 
 if __name__ == "__main__":
     unittest.main()
