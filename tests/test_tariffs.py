@@ -58,7 +58,7 @@ class TariffTests(unittest.IsolatedAsyncioTestCase):
                 tariff
             )
             self.assertIn(tariff.price_text, tariff.button_text)
-            self.assertIn(f"{tariff.duration_days} дн.", tariff.button_text)
+            self.assertIn(f"{tariff.duration_days} дней", tariff.button_text)
 
     def test_admin_buttons_do_not_repeat_admin_label(self):
         button_texts = [
@@ -119,10 +119,14 @@ class TariffTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Устройств:</b> 3", text)
         self.assertIn("Стоимость:</b> 199 ₽", text)
         self.assertIn("Выберите способ оплаты", text)
-        buttons = kwargs["reply_markup"].inline_keyboard[0]
+        buttons = [
+            button
+            for row in kwargs["reply_markup"].inline_keyboard
+            for button in row
+        ]
         self.assertEqual(
-            [button.callback_data for button in buttons],
-            ["pay_stars:standard", "pay_card:standard"]
+            [button.callback_data for button in buttons[:2]],
+            ["pay_card:standard", "pay_stars:standard"]
         )
         self.assertEqual(message.invoices, [])
 

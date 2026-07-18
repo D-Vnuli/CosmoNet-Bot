@@ -37,20 +37,19 @@ class FakeMessage:
 class FeedbackTests(unittest.IsolatedAsyncioTestCase):
     def test_menu_order_and_feedback_button(self):
         subscription_buttons = [
-            row[0].text
+            button.text
             for row in menu.subscription_menu.keyboard
+            for button in row
         ]
         info_buttons = [
-            row[0].text
+            button.text
             for row in menu.info_menu.keyboard
+            for button in row
         ]
 
-        self.assertLess(
-            subscription_buttons.index("🛒 Купить / продлить"),
-            subscription_buttons.index("🔗 Получить конфиг")
-        )
-        self.assertIn("💬 Обратная связь", info_buttons)
-
+        self.assertIn("🛒 Тарифы", subscription_buttons)
+        self.assertIn("🛰 Конфигурация", subscription_buttons)
+        self.assertIn("💬 Поддержка", info_buttons)
     async def test_feedback_start_waits_for_message(self):
         message = FakeMessage()
         state = FakeState()

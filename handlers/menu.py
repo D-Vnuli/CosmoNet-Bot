@@ -1,4 +1,5 @@
 from html import escape
+from pathlib import Path
 
 from aiogram import Router, F
 from aiogram.exceptions import TelegramAPIError
@@ -7,6 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
     CallbackQuery,
+    FSInputFile,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
@@ -35,6 +37,9 @@ from config import (
 
 router = Router()
 
+ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
+WELCOME_BANNER = ASSETS_DIR / "cosmonet-orbit.png"
+
 
 class FeedbackStates(StatesGroup):
     waiting_message = State()
@@ -42,40 +47,32 @@ class FeedbackStates(StatesGroup):
 
 subscription_menu = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="📊 Статус подписки")],
-        [KeyboardButton(text="🛒 Купить / продлить")],
-        [KeyboardButton(text="🔗 Получить конфиг")],
-        [KeyboardButton(text="⬅️ Главное меню")]
+        [KeyboardButton(text="📡 Статус"), KeyboardButton(text="🛒 Тарифы")],
+        [KeyboardButton(text="🛰 Конфигурация")],
+        [KeyboardButton(text="← В главное меню")],
     ],
     resize_keyboard=True,
-    input_field_placeholder="Выберите действие"
+    input_field_placeholder="Управляйте подпиской",
 )
-
 
 info_menu = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="🔑 Как получить подписку")],
-        [KeyboardButton(text="⚙️ Как подключить конфиг")],
-        [KeyboardButton(text="📱 Какие приложения использовать")],
-        [KeyboardButton(text="💬 Обратная связь")],
-        [KeyboardButton(text="⬅️ Главное меню")]
+        [KeyboardButton(text="🔐 Как подключиться")],
+        [KeyboardButton(text="📱 Приложения"), KeyboardButton(text="💬 Поддержка")],
+        [KeyboardButton(text="← В главное меню")],
     ],
     resize_keyboard=True,
-    input_field_placeholder="Выберите раздел"
+    input_field_placeholder="Полезная информация",
 )
-
 
 tariff_menu = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text=tariff.button_text)]
         for tariff in TARIFFS
-    ] + [
-        [KeyboardButton(text="⬅️ Назад к подписке")]
-    ],
+    ] + [[KeyboardButton(text="← К подписке")]],
     resize_keyboard=True,
-    input_field_placeholder="Выберите тариф"
+    input_field_placeholder="Выберите тариф",
 )
-
 
 feedback_cancel_menu = ReplyKeyboardMarkup(
     keyboard=[[
@@ -87,17 +84,13 @@ feedback_cancel_menu = ReplyKeyboardMarkup(
 
 
 def payment_method_keyboard(tariff_code: str):
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(
-            text="⭐ Telegram Stars",
-            callback_data=f"pay_stars:{tariff_code}"
-        ),
-        InlineKeyboardButton(
-            text="💳 Карта",
-            callback_data=f"pay_card:{tariff_code}"
-        )
-    ]])
-
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Карта или СБП", callback_data=f"pay_card:{tariff_code}")],
+            [InlineKeyboardButton(text="⭐ Telegram Stars", callback_data=f"pay_stars:{tariff_code}")],
+            [InlineKeyboardButton(text="📄 Условия и возвраты", url="https://cosmonet.shop/documents/offer.html")],
+        ]
+    )
 def stars_retry_keyboard(order_id: int):
     return InlineKeyboardMarkup(
         inline_keyboard=[[
@@ -117,22 +110,23 @@ async def start_handler(message: Message, state: FSMContext):
         username=message.from_user.username,
         first_name=message.from_user.first_name,
         last_name=message.from_user.last_name,
-        language_code=message.from_user.language_code
+        language_code=message.from_user.language_code,
     )
 
-    await message.answer(
-        "🌌 <b>Добро пожаловать в CosmoNet</b>\n\n"
-        "Быстрый, стабильный и удобный VPN-доступ без лишних настроек.\n\n"
-        "━━━━━━━━━━━━━━\n\n"
-        "🚀 <b>Что доступно сейчас:</b>\n\n"
-        "💳 Управление подпиской\n"
-        "ℹ️ Информация по подключению\n"
-        "📱 Рекомендации по приложениям\n\n"
-        "━━━━━━━━━━━━━━\n\n"
-        "Выберите нужный раздел ниже 👇",
-        reply_markup=main_menu
+    caption = (
+        "<b>CosmoNet</b>  ·  личная орбита связи\n\n"
+        "Защищённый доступ, понятные тарифы и управление подпиской "
+        "в одном месте.\n\n"
+        "<i>Выберите действие в меню ниже.</i>"
     )
-
+    if WELCOME_BANNER.exists():
+        await message.answer_photo(
+            photo=FSInputFile(WELCOME_BANNER),
+            caption=caption,
+            reply_markup=main_menu,
+        )
+    else:
+        await message.answer(caption, reply_markup=main_menu)
 
 @router.message(Command("paysupport"))
 async def payment_support(message: Message):
@@ -173,7 +167,7 @@ async def payment_terms(message: Message):
     )
 
 
-@router.message(F.text == "💬 Обратная связь")
+@router.message(F.text.in_({"💬 Обратная связь", "💬 Поддержка"}))
 async def feedback_start(message: Message, state: FSMContext):
     await state.set_state(FeedbackStates.waiting_message)
     await message.answer(
@@ -282,6 +276,7 @@ async def feedback_reject_content(message: Message):
     )
 
 
+@router.message(F.text == "🪐 Мой CosmoNet")
 @router.message(F.text == "💳 Подписка")
 async def subscription(message: Message):
     await message.answer(
@@ -294,6 +289,7 @@ async def subscription(message: Message):
     )
 
 
+@router.message(F.text == "📡 Статус")
 @router.message(F.text == "📊 Статус подписки")
 async def subscription_status(message: Message):
     telegram_id = str(message.from_user.id)
@@ -343,6 +339,7 @@ async def subscription_status(message: Message):
     )
 
 
+@router.message(F.text == "🛰 Конфигурация")
 @router.message(F.text == "🔗 Получить конфиг")
 async def get_config(message: Message):
     telegram_id = str(message.from_user.id)
@@ -410,6 +407,7 @@ async def get_config(message: Message):
         "Не передавайте эту ссылку другим людям."
     )
 
+@router.message(F.text.in_({"🛒 Тарифы", "🚀 Подключиться"}))
 @router.message(F.text == "🛒 Купить / продлить")
 async def buy_subscription(message: Message):
     service = SubscriptionService()
@@ -769,6 +767,7 @@ async def send_stars_payment_result(message: Message, result: dict):
     )
 
 
+@router.message(F.text == "← К подписке")
 @router.message(F.text == "⬅️ Назад к подписке")
 async def back_to_subscription(message: Message):
     await subscription(message)
@@ -847,6 +846,7 @@ async def apps(message: Message):
     )
 
 
+@router.message(F.text == "← В главное меню")
 @router.message(F.text == "⬅️ Главное меню")
 async def back_to_main(message: Message):
     await message.answer(

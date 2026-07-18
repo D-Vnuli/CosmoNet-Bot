@@ -29,10 +29,9 @@ class Tariff:
     @property
     def button_text(self) -> str:
         return (
-            f"{self.emoji} {self.name} — "
-            f"{self.devices_text} — {self.duration_days} \u0434\u043d. — {self.price_text}"
+            f"{self.emoji} {self.name} · {self.duration_days} дней · "
+            f"{self.price_text}"
         )
-
     @property
     def price_text(self) -> str:
         return f"{self.price_rub} ₽"

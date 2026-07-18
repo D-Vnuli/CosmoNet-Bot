@@ -1,11 +1,17 @@
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 
 
 main_menu = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="💳 Подписка")],
-        [KeyboardButton(text="ℹ️ INFO")]
+        [
+            KeyboardButton(text="🚀 Подключиться"),
+            KeyboardButton(text="🪐 Мой CosmoNet"),
+        ],
+        [
+            KeyboardButton(text="🛰 Конфигурация"),
+            KeyboardButton(text="💬 Поддержка"),
+        ],
     ],
     resize_keyboard=True,
-    input_field_placeholder="Выберите раздел"
+    input_field_placeholder="Выберите действие",
 )
