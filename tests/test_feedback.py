@@ -47,7 +47,7 @@ class FeedbackTests(unittest.IsolatedAsyncioTestCase):
             for button in row
         ]
 
-        self.assertIn("🛒 Тарифы", subscription_buttons)
+        self.assertIn("📡 Статус", subscription_buttons)
         self.assertIn("🛰 Конфигурация", subscription_buttons)
         self.assertIn("🔐 Как подключиться", info_buttons)
         self.assertIn("📱 Приложения", info_buttons)

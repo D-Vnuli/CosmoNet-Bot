@@ -25,7 +25,7 @@ from services.tariff_service import (
     get_tariff_for_user,
 )
 from services.stars_payment_service import StarsPaymentService
-from services.robokassa_payment_service import RobokassaPaymentService
+from services.yookassa_payment_service import YooKassaPaymentService
 from database import add_user_if_not_exists, is_registered_user
 from keyboards.main_menu import main_menu
 from services.xui_service import XUIService, format_bytes, format_expiry_time
@@ -39,6 +39,10 @@ router = Router()
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
 WELCOME_BANNER = ASSETS_DIR / "cosmonet-orbit.png"
+
+
+def _ru(value: str) -> str:
+    return value.encode("ascii").decode("unicode_escape")
 
 
 class FeedbackStates(StatesGroup):
@@ -577,69 +581,47 @@ async def select_card_payment(callback: CallbackQuery):
     tariff = get_tariff_by_code(tariff_code)
 
     if not tariff:
-        await callback.answer(
-            "Тариф не найден.",
-            show_alert=True
-        )
+        await callback.answer(_ru(r"\u0422\u0430\u0440\u0438\u0444 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d."), show_alert=True)
         return
 
     tariff = get_tariff_for_user(callback.from_user.id, tariff)
-
     if not is_registered_user(callback.from_user.id):
-        await callback.answer(
-            "Сначала запустите бота командой /start.",
-            show_alert=True,
-        )
+        await callback.answer(_ru(r"\u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 \u0431\u043e\u0442 \u043a\u043e\u043c\u0430\u043d\u0434\u043e\u0439 /start."), show_alert=True)
         return
 
     subscription_service = SubscriptionService()
-    purchase_result = await subscription_service.get_purchase_action(
-        callback.from_user.id
-    )
+    purchase_result = await subscription_service.get_purchase_action(callback.from_user.id)
     if not purchase_result["success"]:
-        await callback.answer(
-            "Не удалось проверить VPN-профиль.",
-            show_alert=True,
-        )
+        await callback.answer(_ru(r"\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c VPN-\u043f\u0440\u043e\u0444\u0438\u043b\u044c."), show_alert=True)
         return
 
-    payment_service = RobokassaPaymentService(subscription_service)
+    payment_service = YooKassaPaymentService(subscription_service)
     if not payment_service.is_configured:
-        await callback.answer(
-            "Оплата картой временно недоступна.",
-            show_alert=True,
-        )
+        await callback.answer(_ru(r"\u041e\u043f\u043b\u0430\u0442\u0430 \u043a\u0430\u0440\u0442\u043e\u0439 \u0432\u0440\u0435\u043c\u0435\u043d\u043d\u043e \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u043d\u0430."), show_alert=True)
         return
 
-    order = payment_service.create_order(
-        telegram_id=callback.from_user.id,
-        tariff=tariff,
-        purchase_result=purchase_result,
-    )
-    payment_url = payment_service.payment_url(order)
+    order = payment_service.create_order(telegram_id=callback.from_user.id, tariff=tariff, purchase_result=purchase_result)
+    try:
+        payment_url = await payment_service.create_payment(order)
+    except RuntimeError:
+        await callback.answer(_ru(r"\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0441\u043e\u0437\u0434\u0430\u0442\u044c \u043f\u043b\u0430\u0442\u0451\u0436. \u041f\u043e\u043f\u0440\u043e\u0431\u0443\u0439\u0442\u0435 \u043f\u043e\u0437\u0436\u0435."), show_alert=True)
+        return
 
     await callback.answer()
     if not callback.message:
         return
 
-    await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer(
-        "💳 <b>Оплата через Robokassa</b>\n\n"
-        f"{tariff.emoji} Тариф: <b>{tariff.name}</b>\n"
-        f"📱 Устройства: <b>{tariff.devices}</b>\n"
-        f"📅 Срок: <b>{tariff.duration_days} дней</b>\n"
-        f"💳 К оплате: <b>{tariff.price_text}</b>\n\n"
-        "После успешной оплаты бот автоматически выдаст или продлит доступ.",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[[
-                InlineKeyboardButton(
-                    text="💳 Перейти к оплате",
-                    url=payment_url,
-                )
-            ]]
-        ),
+    await callback.message.edit_text(
+        _ru(r"\U0001f4b3 <b>\u041e\u043f\u043b\u0430\u0442\u0430 \u043a\u0430\u0440\u0442\u043e\u0439 \u0438\u043b\u0438 \u0421\u0411\u041f</b>\n\n")
+        + f"{tariff.emoji} " + _ru(r"\u0422\u0430\u0440\u0438\u0444: ") + f"<b>{tariff.name}</b>\n"
+        + _ru(r"\U0001f4f1 \u0423\u0441\u0442\u0440\u043e\u0439\u0441\u0442\u0432\u0430: ") + f"<b>{tariff.devices}</b>\n"
+        + _ru(r"\U0001f4c5 \u0421\u0440\u043e\u043a: ") + f"<b>{tariff.duration_days}</b> " + _ru(r"\u0434\u043d\u0435\u0439\n")
+        + _ru(r"\U0001f4b3 \u041a \u043e\u043f\u043b\u0430\u0442\u0435: ") + f"<b>{tariff.price_text}</b>\n\n"
+        + _ru(r"\u0412\u044b \u0431\u0443\u0434\u0435\u0442\u0435 \u043f\u0435\u0440\u0435\u043d\u0430\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u044b \u0432 YooKassa. \u041f\u043e\u0441\u043b\u0435 \u0443\u0441\u043f\u0435\u0448\u043d\u043e\u0439 \u043e\u043f\u043b\u0430\u0442\u044b \u0431\u043e\u0442 \u0430\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u0438 \u0432\u044b\u0434\u0430\u0441\u0442 \u0438\u043b\u0438 \u043f\u0440\u043e\u0434\u043b\u0438\u0442 \u0434\u043e\u0441\u0442\u0443\u043f."),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text=_ru(r"\U0001f4b3 \u041f\u0435\u0440\u0435\u0439\u0442\u0438 \u043a \u043e\u043f\u043b\u0430\u0442\u0435"), url=payment_url)
+        ]]),
     )
-
 
 @router.pre_checkout_query()
 async def process_stars_pre_checkout(query: PreCheckoutQuery):

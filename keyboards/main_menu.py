@@ -7,7 +7,10 @@ main_menu = ReplyKeyboardMarkup(
             KeyboardButton(text="🚀 Подключиться"),
             KeyboardButton(text="🪐 Мой CosmoNet"),
         ],
-        [KeyboardButton(text="🆘 Помощь")],
+        [
+            KeyboardButton(text="🛰 Конфигурация"),
+            KeyboardButton(text="🆘 Помощь"),
+        ],
     ],
     resize_keyboard=True,
     input_field_placeholder="Выберите действие",

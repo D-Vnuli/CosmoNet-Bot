@@ -22,8 +22,8 @@ def calculate_target_expiry_ms(
 
 
 class SubscriptionService:
-    def __init__(self):
-        self.xui = XUIService()
+    def __init__(self, xui: XUIService | None = None):
+        self.xui = xui or XUIService()
 
     async def get_user_vpn_client(self, telegram_id: int):
         client_email = get_client_email_by_telegram_id(telegram_id)

@@ -553,7 +553,8 @@ def fail_order(order_id: int, error: str):
         """, (error, now, order_id))
         conn.commit()
 
-def create_robokassa_order(
+
+def create_yookassa_order(
     *,
     telegram_id: int,
     tariff_code: str,
@@ -582,7 +583,7 @@ def create_robokassa_order(
                 created_at,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, 'robokassa', 'pending',
+            VALUES (?, ?, ?, ?, ?, 'yookassa', 'pending',
                     ?, ?, 'RUB', ?, ?)
         """, (
             telegram_id,
@@ -599,7 +600,7 @@ def create_robokassa_order(
         return cursor.lastrowid
 
 
-def claim_robokassa_payment(order_id: int):
+def claim_yookassa_payment(*, order_id: int, payment_id: str):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     with get_connection() as conn:
@@ -612,7 +613,7 @@ def claim_robokassa_payment(order_id: int):
             return "not_found", None
 
         order = dict(row)
-        if order["provider"] != "robokassa":
+        if order["provider"] != "yookassa":
             return "invalid", order
         if order["status"] == "paid":
             return "already_paid", order
@@ -629,7 +630,7 @@ def claim_robokassa_payment(order_id: int):
                 error = NULL,
                 updated_at = ?
             WHERE id = ?
-        """, (f"robokassa:{order_id}", now, now, order_id))
+        """, (payment_id, now, now, order_id))
         conn.commit()
 
     return "claimed", get_order(order_id)

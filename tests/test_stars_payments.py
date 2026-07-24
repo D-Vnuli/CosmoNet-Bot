@@ -211,14 +211,13 @@ class StarsPaymentHandlerTests(unittest.IsolatedAsyncioTestCase):
             "cosmonet-stars:15"
         )
 
-    async def test_card_method_creates_robokassa_link(self):
+    async def test_card_method_creates_yookassa_link(self):
         callback = Mock()
         callback.data = "pay_card:lite"
         callback.from_user = SimpleNamespace(id=1001)
         callback.answer = AsyncMock()
         callback.message = Mock()
-        callback.message.edit_reply_markup = AsyncMock()
-        callback.message.answer = AsyncMock()
+        callback.message.edit_text = AsyncMock()
 
         subscription_service = Mock()
         subscription_service.get_purchase_action = AsyncMock(
@@ -227,25 +226,27 @@ class StarsPaymentHandlerTests(unittest.IsolatedAsyncioTestCase):
         payment_service = Mock()
         payment_service.is_configured = True
         payment_service.create_order = Mock(return_value={"id": 15})
-        payment_service.payment_url = Mock(
-            return_value="https://auth.robokassa.ru/Merchant/Index.aspx?InvId=15"
+        payment_service.create_payment = AsyncMock(
+            return_value="https://yookassa.ru/checkout/15"
         )
 
         with (
             patch.object(menu, "is_registered_user", return_value=True),
             patch.object(menu, "SubscriptionService", return_value=subscription_service),
-            patch.object(menu, "RobokassaPaymentService", return_value=payment_service),
+            patch.object(menu, "YooKassaPaymentService", return_value=payment_service),
         ):
             await menu.select_card_payment(callback)
 
         payment_service.create_order.assert_called_once()
-        text = callback.message.answer.await_args.args[0]
-        markup = callback.message.answer.await_args.kwargs["reply_markup"]
-        self.assertIn("Robokassa", text)
+        payment_service.create_payment.assert_awaited_once_with({"id": 15})
+        callback.message.edit_reply_markup.assert_not_called()
+        callback.message.answer.assert_not_called()
+        markup = callback.message.edit_text.await_args.kwargs["reply_markup"]
         self.assertEqual(
             markup.inline_keyboard[0][0].url,
-            "https://auth.robokassa.ru/Merchant/Index.aspx?InvId=15",
+            "https://yookassa.ru/checkout/15",
         )
+
     async def test_pre_checkout_query_is_answered(self):
         query = Mock()
         query.from_user = SimpleNamespace(id=1001)

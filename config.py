@@ -99,17 +99,13 @@ XUI_PROVISIONING_INBOUND_IDS = get_int_list(
     "XUI_PROVISIONING_INBOUND_IDS"
 )
 
-ROBOKASSA_MERCHANT_LOGIN = os.getenv(
-    "ROBOKASSA_MERCHANT_LOGIN", ""
+YOOKASSA_SHOP_ID = os.getenv("YOOKASSA_SHOP_ID", "").strip()
+YOOKASSA_SECRET_KEY = os.getenv("YOOKASSA_SECRET_KEY", "")
+YOOKASSA_RETURN_URL = os.getenv(
+    "YOOKASSA_RETURN_URL",
+    "https://cosmonet.shop/",
 ).strip()
-ROBOKASSA_PASSWORD_1 = os.getenv("ROBOKASSA_PASSWORD_1", "")
-ROBOKASSA_PASSWORD_2 = os.getenv("ROBOKASSA_PASSWORD_2", "")
-ROBOKASSA_HASH_ALGORITHM = os.getenv(
-    "ROBOKASSA_HASH_ALGORITHM", "md5"
-).strip().lower()
-ROBOKASSA_IS_TEST = os.getenv(
-    "ROBOKASSA_IS_TEST", "false"
-).strip().lower() in {"1", "true", "yes", "on"}
+
 DEVICE_LIMIT_OVERRIDES = get_device_limit_overrides("DEVICE_LIMIT_OVERRIDES")
 STARS_PRICE_PROMO = get_positive_int("STARS_PRICE_PROMO", 30)
 STARS_PRICE_LITE = get_positive_int("STARS_PRICE_LITE", 79)

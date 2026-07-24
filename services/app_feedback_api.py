@@ -13,8 +13,14 @@ from aiogram import Bot
 
 from config import ADMIN_IDS, BOT_USERNAME, XUI_SUB_BASE_URL
 from services.app_auth_service import AppAuthService
-from services.robokassa_payment_service import RobokassaPaymentService
+from services.subscription_service import SubscriptionService
+from services.tariff_service import get_tariff_by_code, get_tariff_for_user
+from services.yookassa_payment_service import YooKassaPaymentService
 from services.xui_service import XUIService
+
+
+def _ru(value: str) -> str:
+    return value.encode("ascii").decode("unicode_escape")
 
 
 MAX_REQUESTS_PER_WINDOW = 3
@@ -82,12 +88,16 @@ def create_app(
     bot: Bot,
     xui_service: XUIService | None = None,
     auth_service: AppAuthService | None = None,
+    yookassa_service: YooKassaPaymentService | None = None,
     bot_username: str | None = None,
 ) -> web.Application:
     app = web.Application(client_max_size=16 * 1024)
     rate_limiter = FeedbackRateLimiter()
     xui = xui_service or XUIService()
     auth = auth_service or AppAuthService()
+    yookassa = yookassa_service or YooKassaPaymentService(
+        SubscriptionService(xui)
+    )
     telegram_username = (bot_username if bot_username is not None else BOT_USERNAME).lstrip("@").strip()
 
     async def submit_feedback(request: web.Request) -> web.Response:
@@ -104,23 +114,24 @@ def create_app(
             return web.json_response({"message": "Сервис временно недоступен."}, status=503)
         return web.json_response({"delivered": True})
 
-    async def robokassa_result(request: web.Request) -> web.Response:
+
+    async def yookassa_result(request: web.Request) -> web.Response:
         try:
-            data = {
-                str(key): str(value)
-                for key, value in (await request.post()).items()
-            }
-        except web.HTTPException:
-            return web.Response(status=400, text="Invalid request")
+            payload = await request.json()
+        except (ValueError, web.HTTPException):
+            return web.json_response({"accepted": False}, status=400)
 
-        result = await RobokassaPaymentService().process_result(data)
-        order = result.get("order")
-        if not order:
-            return web.Response(status=400, text="Invalid payment")
+        result = await yookassa.process_notification(payload)
+        if result.get("status") in {"paid", "provisioning_failed"}:
+            await _notify_yookassa_result(bot, result)
+        return web.json_response({"accepted": True})
 
-        if result["status"] in {"paid", "provisioning_failed"}:
-            await _notify_robokassa_result(bot, result)
-        return web.Response(text=f"OK{order['id']}")
+    async def yookassa_return(_: web.Request) -> web.Response:
+        return web.Response(
+            text=_ru(r"<h1>\u041e\u043f\u043b\u0430\u0442\u0430 \u043e\u0431\u0440\u0430\u0431\u0430\u0442\u044b\u0432\u0430\u0435\u0442\u0441\u044f</h1><p>\u0412\u0435\u0440\u043d\u0438\u0442\u0435\u0441\u044c \u0432 Telegram-\u0431\u043e\u0442: \u0434\u043e\u0441\u0442\u0443\u043f \u0431\u0443\u0434\u0435\u0442 \u0432\u044b\u0434\u0430\u043d \u0430\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u0438 \u043f\u043e\u0441\u043b\u0435 \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u044f \u043f\u043b\u0430\u0442\u0435\u0436\u0430.</p>"),
+            content_type="text/html",
+        )
+
     async def start_auth(request: web.Request) -> web.Response:
         if not telegram_username:
             return web.json_response({"message": "Telegram bot username is not configured."}, status=503)
@@ -171,17 +182,57 @@ def create_app(
         except RuntimeError:
             return web.json_response({"message": "3X-UI is unavailable."}, status=503)
 
+    async def create_yookassa_payment(request: web.Request) -> web.Response:
+        token = _bearer_token(request)
+        owner = auth.get_token_owner(token) if token else None
+        if not owner:
+            return web.json_response({"message": "Unauthorized."}, status=401)
+        if not yookassa.is_configured:
+            return web.json_response({"message": "Payments are unavailable."}, status=503)
+
+        try:
+            data = await request.json()
+            tariff_code = _required_text(data, "tariffCode", 32).lower()
+            tariff = get_tariff_by_code(tariff_code)
+            if not tariff:
+                raise ValueError("tariffCode")
+
+            telegram_id = int(owner["telegram_id"])
+            purchase_result = await yookassa.subscription_service.get_purchase_action(
+                telegram_id
+            )
+            if not purchase_result.get("success"):
+                raise RuntimeError("Subscription service is unavailable.")
+
+            order = yookassa.create_order(
+                telegram_id=telegram_id,
+                tariff=get_tariff_for_user(telegram_id, tariff),
+                purchase_result=purchase_result,
+            )
+            payment_url = await yookassa.create_payment(order)
+        except (ValueError, web.HTTPException):
+            return web.json_response({"message": "Invalid payment request."}, status=400)
+        except RuntimeError:
+            return web.json_response({"message": "Payments are unavailable."}, status=503)
+
+        return web.json_response({
+            "orderId": order["id"],
+            "paymentUrl": payment_url,
+        })
+
     async def logout(request: web.Request) -> web.Response:
         token = _bearer_token(request)
         if not token or not auth.revoke_token(token):
             return web.json_response({"message": "Unauthorized."}, status=401)
         return web.json_response({"loggedOut": True})
 
-    app.router.add_post("/payments/robokassa/result", robokassa_result)
+    app.router.add_post("/payments/yookassa/result", yookassa_result)
+    app.router.add_get("/payments/yookassa/return", yookassa_return)
     app.router.add_post("/api/app/feedback", submit_feedback)
     app.router.add_post("/api/app/auth/start", start_auth)
     app.router.add_get("/api/app/auth/status", auth_status)
     app.router.add_get("/api/app/subscription", get_subscription)
+    app.router.add_post("/api/app/payments/yookassa", create_yookassa_payment)
     app.router.add_post("/api/app/auth/logout", logout)
     return app
 
@@ -270,22 +321,13 @@ def _configured_admin_ids() -> list[int]:
         if value.strip().isdigit()
     ] or ADMIN_IDS
 
-async def _notify_robokassa_result(bot: Bot, result: dict) -> None:
+
+async def _notify_yookassa_result(bot: Bot, result: dict) -> None:
     order = result["order"]
     if result["status"] == "paid":
-        text = (
-            "✅ <b>Оплата картой подтверждена</b>\n\n"
-            f"Заказ: <code>#{order['id']}</code>\n"
-            "Подписка выдана. Откройте раздел «Подписка» в боте, "
-            "чтобы получить конфигурацию."
-        )
+        text = (_ru(r"\u2705 <b>\u041e\u043f\u043b\u0430\u0442\u0430 \u043a\u0430\u0440\u0442\u043e\u0439 \u0438\u043b\u0438 \u0421\u0411\u041f \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0430</b>\n\n") + _ru(r"\u0417\u0430\u043a\u0430\u0437: ") + f"<code>#{order['id']}</code>\n" + _ru(r"\u041f\u043e\u0434\u043f\u0438\u0441\u043a\u0430 \u0432\u044b\u0434\u0430\u043d\u0430. \u041e\u0442\u043a\u0440\u043e\u0439\u0442\u0435 \u0440\u0430\u0437\u0434\u0435\u043b \u00ab\u041f\u043e\u0434\u043f\u0438\u0441\u043a\u0430\u00bb \u0432 \u0431\u043e\u0442\u0435, \u0447\u0442\u043e\u0431\u044b \u043f\u043e\u043b\u0443\u0447\u0438\u0442\u044c \u043a\u043e\u043d\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u044e."))
     else:
-        text = (
-            "⚠️ <b>Оплата картой получена</b>\n\n"
-            f"Заказ: <code>#{order['id']}</code>\n"
-            "Выдача подписки временно не завершилась. Не оплачивайте "
-            "заказ повторно — напишите в поддержку через /paysupport."
-        )
+        text = (_ru(r"\u26a0\ufe0f <b>\u041e\u043f\u043b\u0430\u0442\u0430 \u043f\u043e\u043b\u0443\u0447\u0435\u043d\u0430</b>\n\n") + _ru(r"\u0417\u0430\u043a\u0430\u0437: ") + f"<code>#{order['id']}</code>\n" + _ru(r"\u0412\u044b\u0434\u0430\u0447\u0430 \u043f\u043e\u0434\u043f\u0438\u0441\u043a\u0438 \u0432\u0440\u0435\u043c\u0435\u043d\u043d\u043e \u043d\u0435 \u0437\u0430\u0432\u0435\u0440\u0448\u0438\u043b\u0430\u0441\u044c. \u041d\u0435 \u043e\u043f\u043b\u0430\u0447\u0438\u0432\u0430\u0439\u0442\u0435 \u0437\u0430\u043a\u0430\u0437 \u043f\u043e\u0432\u0442\u043e\u0440\u043d\u043e \u2014 \u043d\u0430\u043f\u0438\u0448\u0438\u0442\u0435 \u0432 \u043f\u043e\u0434\u0434\u0435\u0440\u0436\u043a\u0443 \u0447\u0435\u0440\u0435\u0437 /paysupport."))
     try:
         await bot.send_message(chat_id=order["telegram_id"], text=text)
     except Exception:
