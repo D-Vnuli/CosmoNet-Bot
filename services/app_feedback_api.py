@@ -7,12 +7,14 @@ import os
 from html import escape
 from time import monotonic
 from typing import Any, Iterable
+from urllib.parse import quote
 
 from aiohttp import web
 from aiogram import Bot
 
 from config import ADMIN_IDS, BOT_USERNAME, XUI_SUB_BASE_URL
 from services.app_auth_service import AppAuthService
+from services.bootstrap_vpn_service import BootstrapVpnService
 from services.subscription_service import SubscriptionService
 from services.tariff_service import get_tariff_by_code, get_tariff_for_user
 from services.yookassa_payment_service import YooKassaPaymentService
@@ -88,13 +90,16 @@ def create_app(
     bot: Bot,
     xui_service: XUIService | None = None,
     auth_service: AppAuthService | None = None,
+    bootstrap_vpn_service: BootstrapVpnService | None = None,
     yookassa_service: YooKassaPaymentService | None = None,
     bot_username: str | None = None,
 ) -> web.Application:
     app = web.Application(client_max_size=16 * 1024)
     rate_limiter = FeedbackRateLimiter()
+    auth_rate_limiter = FeedbackRateLimiter()
     xui = xui_service or XUIService()
     auth = auth_service or AppAuthService()
+    bootstrap_vpn = bootstrap_vpn_service or BootstrapVpnService()
     yookassa = yookassa_service or YooKassaPaymentService(
         SubscriptionService(xui)
     )
@@ -133,6 +138,8 @@ def create_app(
         )
 
     async def start_auth(request: web.Request) -> web.Response:
+        if not auth_rate_limiter.allow(request.remote or "unknown"):
+            return web.json_response({"message": "Too many authorization attempts."}, status=429)
         if not telegram_username:
             return web.json_response({"message": "Telegram bot username is not configured."}, status=503)
         try:
@@ -149,10 +156,27 @@ def create_app(
             platform=platform,
         )
         session_id = session["sessionId"]
-        return web.json_response({
+        response = {
             **session,
-            "telegramDeepLink": f"https://t.me/{telegram_username}?start=auth_{session_id}",
-        })
+            "telegramDeepLink": f"tg://resolve?domain={telegram_username}&start=auth_{session_id}",
+            "telegramWebLink": (
+                "https://web.telegram.org/k/#?tgaddr="
+                + quote(
+                    f"tg://resolve?domain={telegram_username}&start=auth_{session_id}",
+                    safe="",
+                )
+            ),
+        }
+        try:
+            bootstrap_profile = await bootstrap_vpn.create_profile(
+                session_id=session_id,
+                expires_at=datetime.fromisoformat(session["expiresAt"]),
+            )
+        except RuntimeError:
+            bootstrap_profile = None
+        if bootstrap_profile:
+            response["bootstrapVpn"] = bootstrap_profile
+        return web.json_response(response)
 
     async def auth_status(request: web.Request) -> web.Response:
         device_id = request.query.get("deviceId", "").strip()
@@ -162,12 +186,15 @@ def create_app(
 
         result = auth.get_status(device_id=device_id, session_id=session_id)
         if not result["isAuthorized"]:
+            if not result.get("isPending"):
+                await bootstrap_vpn.revoke_for_session(session_id)
             return web.json_response(result)
 
         try:
             result.update(await _subscription_payload(xui, int(result["telegramId"])))
         except RuntimeError:
             return web.json_response({"message": "3X-UI is unavailable."}, status=503)
+        await bootstrap_vpn.revoke_for_session(session_id)
         return web.json_response(result)
 
     async def get_subscription(request: web.Request) -> web.Response:

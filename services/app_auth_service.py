@@ -9,7 +9,7 @@ from typing import Any
 import database
 
 
-SESSION_TTL_MINUTES = 10
+SESSION_TTL_MINUTES = 5
 TOKEN_TTL_DAYS = 90
 
 

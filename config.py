@@ -118,3 +118,15 @@ PAY_SUPPORT_CONTACT = os.getenv(
     "PAY_SUPPORT_CONTACT",
     ""
 ).strip()
+
+# Isolated short-lived VPN used only while the Windows client opens Telegram
+# for first-time authorization. It is deliberately disabled by default.
+BOOTSTRAP_VPN_ENABLED = os.getenv("BOOTSTRAP_VPN_ENABLED", "false").strip().lower() == "true"
+BOOTSTRAP_XUI_BASE_URL = os.getenv("BOOTSTRAP_XUI_BASE_URL", "").strip()
+BOOTSTRAP_XUI_API_TOKEN = os.getenv("BOOTSTRAP_XUI_API_TOKEN", "").strip()
+BOOTSTRAP_XUI_INBOUND_ID_RAW = os.getenv("BOOTSTRAP_XUI_INBOUND_ID", "").strip()
+BOOTSTRAP_XUI_INBOUND_ID = int(BOOTSTRAP_XUI_INBOUND_ID_RAW) if BOOTSTRAP_XUI_INBOUND_ID_RAW.isdigit() else None
+BOOTSTRAP_VPN_HOST = os.getenv("BOOTSTRAP_VPN_HOST", "").strip()
+BOOTSTRAP_VPN_SNI = os.getenv("BOOTSTRAP_VPN_SNI", "").strip()
+BOOTSTRAP_REALITY_PUBLIC_KEY = os.getenv("BOOTSTRAP_REALITY_PUBLIC_KEY", "").strip()
+BOOTSTRAP_REALITY_SHORT_ID = os.getenv("BOOTSTRAP_REALITY_SHORT_ID", "").strip()

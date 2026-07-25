@@ -1,12 +1,13 @@
 import os
 import unittest
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 from aiohttp.test_utils import TestClient, TestServer
 
 os.environ.setdefault("BOT_TOKEN", "123456:test-token")
 os.environ["ADMIN_IDS"] = "100,200"
 
+from services.bootstrap_vpn_service import BootstrapVpnService
 from services.app_feedback_api import (
     FeedbackPayload,
     create_app,
@@ -124,6 +125,64 @@ class FeedbackApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status, 401)
         finally:
             await client.close()
+
+
+class FakeStartAuthService:
+    def create_login_session(self, *, device_id, device_name, platform):
+        return {
+            "sessionId": "bootstrap-session",
+            "expiresAt": "2030-01-01T00:00:00+00:00",
+        }
+
+
+class FakeBootstrapVpnService:
+    async def create_profile(self, *, session_id, expires_at):
+        return {
+            "vlessUri": "vless://temporary-profile",
+            "expiresAt": expires_at.isoformat(),
+        }
+
+    async def revoke_for_session(self, session_id):
+        return None
+
+
+class BootstrapAuthorizationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_auth_start_returns_disposable_bootstrap_profile(self):
+        client = TestClient(TestServer(create_app(
+            FakeBot(),
+            auth_service=FakeStartAuthService(),
+            bootstrap_vpn_service=FakeBootstrapVpnService(),
+            bot_username="CosmoNetBot",
+        )))
+        await client.start_server()
+
+        try:
+            response = await client.post(
+                "/api/app/auth/start",
+                json={"deviceId": "device-1", "deviceName": "PC", "platform": "windows"},
+            )
+            payload = await response.json()
+
+            self.assertEqual(response.status, 200)
+            self.assertEqual(payload["telegramDeepLink"], "tg://resolve?domain=CosmoNetBot&start=auth_bootstrap-session")
+            self.assertEqual(payload["bootstrapVpn"]["vlessUri"], "vless://temporary-profile")
+        finally:
+            await client.close()
+
+    def test_bootstrap_profile_is_reality_vless_with_single_client_id(self):
+        with patch.multiple(
+            "services.bootstrap_vpn_service",
+            BOOTSTRAP_VPN_HOST="45.151.69.119",
+            BOOTSTRAP_VPN_SNI="www.cloudflare.com",
+            BOOTSTRAP_REALITY_PUBLIC_KEY="public-key",
+            BOOTSTRAP_REALITY_SHORT_ID="abcd",
+        ):
+            uri = BootstrapVpnService()._build_vless_uri("client-id")
+
+        self.assertIn("vless://client-id@45.151.69.119:10443", uri)
+        self.assertIn("security=reality", uri)
+        self.assertIn("pbk=public-key", uri)
+        self.assertIn("sid=abcd", uri)
 
 
 if __name__ == "__main__":
