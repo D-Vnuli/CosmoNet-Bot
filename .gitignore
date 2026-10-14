@@ -1,0 +1,25 @@
+# Virtual Environment
+.venv/
+
+# Environment
+.env
+
+# Python
+__pycache__/
+*.pyc
+
+# IDE
+.idea/
+
+# Logs
+logs/
+
+# Database
+database/*.db
+database/*.sqlite3
+database/*-journal
+database/*.db-wal
+database/*.db-shm
+
+# Local generated VPN test artifacts
+artifacts/
